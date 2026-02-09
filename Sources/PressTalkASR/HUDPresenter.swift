@@ -76,6 +76,10 @@ final class HUDPresenter {
         stateMachine.showTranscribing()
     }
 
+    func updateTranscribingPreview(_ text: String) {
+        stateMachine.updateTranscribingPreview(text)
+    }
+
     func showSuccess(_ text: String) {
         levelMeter.setActive(false)
         stateMachine.showSuccess(text)

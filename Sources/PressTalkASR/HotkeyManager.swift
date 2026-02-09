@@ -8,9 +8,9 @@ enum HotkeyError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .installHandlerFailed(let status):
-            return "Failed to install hotkey handler (status: \(status))."
+            return "热键处理程序安装失败（状态码：\(status)）。"
         case .registerHotkeyFailed(let status):
-            return "Failed to register hotkey Option+Space (status: \(status))."
+            return "热键 Option+Space 注册失败（状态码：\(status)）。"
         }
     }
 }

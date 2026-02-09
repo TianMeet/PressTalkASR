@@ -15,25 +15,37 @@ final class AudioRecorder {
         case recorderInitFailed
         case recordingStartFailed
         case notRecording
+        case noSupportedRecordingFormat
 
         var errorDescription: String? {
             switch self {
             case .permissionDenied:
-                return "Microphone permission is not granted."
+                return "麦克风权限未授予。"
             case .alreadyRecording:
-                return "Recorder is already running."
+                return "录音器已在运行中。"
             case .recorderInitFailed:
-                return "Unable to initialize audio recorder."
+                return "无法初始化录音器。"
             case .recordingStartFailed:
-                return "Unable to start recording."
+                return "无法开始录音。"
             case .notRecording:
-                return "No active recording session."
+                return "当前没有进行中的录音会话。"
+            case .noSupportedRecordingFormat:
+                return "当前 Mac 没有可用的录音格式。"
             }
         }
     }
 
     var onRMS: ((Float) -> Void)?
     var onMeterSample: ((MeterSample) -> Void)?
+
+    private enum Constants {
+        static let meteringIntervalMs = 90
+        /// 优先使用较低采样率：OpenAI STT 内部以 16kHz 处理，22.05kHz 足够且文件更小
+        static let aacPreferredSampleRate: Double = 22_050
+        static let aacFallbackSampleRate: Double = 44_100
+        static let pcmSampleRate: Double = 16_000
+        static let aacBitRate = 64_000
+    }
 
     private(set) var lastDuration: TimeInterval = 0
 
@@ -64,25 +76,66 @@ final class AudioRecorder {
     func startRecording() throws -> URL {
         guard recorder == nil else { throw RecorderError.alreadyRecording }
 
-        let targetURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("press-talk-\(UUID().uuidString)")
-            .appendingPathExtension("wav")
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 16_000,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsFloatKey: false
+        // Prefer compressed AAC for faster upload; if codec init fails on this Mac,
+        // automatically fall back to PCM WAV so recording can still proceed.
+        let candidates: [(ext: String, settings: [String: Any])] = [
+            (
+                "m4a",
+                [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: Constants.aacPreferredSampleRate,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderBitRateKey: Constants.aacBitRate,
+                    AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+                ]
+            ),
+            (
+                "m4a",
+                [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: Constants.aacFallbackSampleRate,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderBitRateKey: Constants.aacBitRate,
+                    AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+                ]
+            ),
+            (
+                "wav",
+                [
+                    AVFormatIDKey: kAudioFormatLinearPCM,
+                    AVSampleRateKey: Constants.pcmSampleRate,
+                    AVNumberOfChannelsKey: 1,
+                    AVLinearPCMBitDepthKey: 16,
+                    AVLinearPCMIsBigEndianKey: false,
+                    AVLinearPCMIsFloatKey: false
+                ]
+            )
         ]
 
-        let recorder = try AVAudioRecorder(url: targetURL, settings: settings)
-        recorder.isMeteringEnabled = true
-        recorder.prepareToRecord()
+        var preparedRecorder: AVAudioRecorder?
+        var preparedURL: URL?
 
-        guard recorder.record() else {
-            throw RecorderError.recordingStartFailed
+        for candidate in candidates {
+            let targetURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("press-talk-\(UUID().uuidString)")
+                .appendingPathExtension(candidate.ext)
+
+            do {
+                let recorder = try AVAudioRecorder(url: targetURL, settings: candidate.settings)
+                recorder.isMeteringEnabled = true
+                recorder.prepareToRecord()
+                if recorder.record() {
+                    preparedRecorder = recorder
+                    preparedURL = targetURL
+                    break
+                }
+            } catch {
+                continue
+            }
+        }
+
+        guard let recorder = preparedRecorder, let outputURL = preparedURL else {
+            throw RecorderError.noSupportedRecordingFormat
         }
 
         self.recorder = recorder
@@ -90,7 +143,7 @@ final class AudioRecorder {
         self.lastDuration = 0
         startMetering()
 
-        return targetURL
+        return outputURL
     }
 
     func stopRecording() throws -> URL {
@@ -113,7 +166,8 @@ final class AudioRecorder {
         stopMetering()
 
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(60))
+        // Lower metering frequency to reduce load on busy systems.
+        timer.schedule(deadline: .now(), repeating: .milliseconds(Constants.meteringIntervalMs))
         timer.setEventHandler { [weak self] in
             guard let self, let recorder = self.recorder else { return }
             recorder.updateMeters()
@@ -126,7 +180,7 @@ final class AudioRecorder {
             if let last = self.lastMeterTimestamp {
                 frameDurationMs = Double(now.uptimeNanoseconds - last.uptimeNanoseconds) / 1_000_000
             } else {
-                frameDurationMs = 60
+                frameDurationMs = 90
             }
             self.lastMeterTimestamp = now
 

@@ -89,7 +89,7 @@ struct HUDView: View {
     private var middleFeedback: some View {
         switch stateMachine.mode {
         case .listening:
-            AudioBarsView(levels: levelMeter.levels, color: stateColor)
+            AudioDotWaveView(levels: levelMeter.levels, color: stateColor)
         case .transcribing:
             HStack(spacing: 8) {
                 ProgressView()
@@ -125,16 +125,24 @@ struct HUDView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
-        case .transcribing:
-            VStack(alignment: .leading, spacing: 2) {
-                Text(settings.autoPasteEnabled ? "识别中…（将自动复制并粘贴）" : "识别中…（将自动复制）")
+        case .transcribing(let preview):
+            if preview.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(settings.autoPasteEnabled ? "识别中…（将自动复制并粘贴）" : "识别中…（将自动复制）")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("\(settings.languageMode) · \(settings.modelMode)")
+                        .font(.system(size: 11.5, weight: .regular))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            } else {
+                Text(preview)
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text("\(settings.languageMode) · \(settings.modelMode)")
-                    .font(.system(size: 11.5, weight: .regular))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
             }
         case .success(let text):
             Text(text)
@@ -220,19 +228,56 @@ struct HUDView: View {
     }
 }
 
-private struct AudioBarsView: View {
+private struct AudioDotWaveView: View {
     let levels: [CGFloat]
     let color: Color
 
     var body: some View {
-        HStack(alignment: .center, spacing: 4) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(color.opacity(0.40))
-                    .frame(width: 3, height: max(4, 20 * level))
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+            let energy = max(0, min(1, normalizedEnergy))
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+
+            HStack(alignment: .center, spacing: 4.5) {
+                ForEach(Array(levels.enumerated()), id: \.offset) { index, level in
+                    let envelope = centerEnvelope(for: index)
+                    let levelInfluence = max(0, min(1, level))
+                    let wave = 0.5 + 0.5 * sin(phase * 6.2 + Double(index) * 0.52)
+                    let amplitude = (0.28 + energy * 0.72) * envelope
+                    let pulse = (0.55 + 0.45 * wave) * (0.55 + 0.45 * levelInfluence)
+                    let scale = 0.58 + amplitude * pulse * 1.45
+                    let yOffset = -amplitude * pulse * 7.0
+                    let opacity = 0.24 + amplitude * 0.74
+                    let glow = 1.0 + amplitude * 3.8
+
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(opacity), color.opacity(opacity * 0.72)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 5.2, height: 5.2)
+                        .scaleEffect(scale)
+                        .offset(y: yOffset)
+                        .shadow(color: color.opacity(0.28), radius: glow, x: 0, y: 0)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var normalizedEnergy: CGFloat {
+        guard !levels.isEmpty else { return 0 }
+        let sum = levels.reduce(0, +)
+        return sum / CGFloat(levels.count)
+    }
+
+    private func centerEnvelope(for index: Int) -> CGFloat {
+        let center = CGFloat(max(1, levels.count - 1)) / 2
+        let distance = abs(CGFloat(index) - center) / max(1, center)
+        return max(0.22, 1 - distance * distance)
     }
 }
 

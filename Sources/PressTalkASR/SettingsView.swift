@@ -141,6 +141,20 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
+                Picker("Transcription Route", selection: $settings.transcriptionRouteRawValue) {
+                    ForEach(AppSettings.TranscriptionRoute.allCases) { route in
+                        Text(route.displayName).tag(route.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("Language", selection: $settings.languageModeRawValue) {
+                    ForEach(AppSettings.LanguageMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 HStack(spacing: 10) {
                     modelHint(
                         title: "gpt-4o-mini-transcribe",
@@ -189,6 +203,30 @@ struct SettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(UITheme.secondaryText)
                 }
+
+                DisclosureGroup("Advanced (Realtime VAD)") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        stepperRow(
+                            title: "Realtime Silence Duration",
+                            valueText: String(format: "%.0f ms", settings.realtimeSilenceDurationMs)
+                        ) {
+                            Stepper("", value: $settings.realtimeSilenceDurationMs, in: 300 ... 1500, step: 50)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+
+                        stepperRow(
+                            title: "Realtime Prefix Padding",
+                            valueText: String(format: "%.0f ms", settings.realtimePrefixPaddingMs)
+                        ) {
+                            Stepper("", value: $settings.realtimePrefixPaddingMs, in: 80 ... 500, step: 20)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.system(size: 12, weight: .semibold))
 
                 if !statusMessage.isEmpty {
                     Text(statusMessage)

@@ -5,7 +5,7 @@ import CoreGraphics
 @MainActor
 final class AudioLevelMeter: ObservableObject {
     struct Configuration {
-        var barCount: Int = 10
+        var barCount: Int = 16
         var minLevel: CGFloat = 0.12
         var maxLevel: CGFloat = 1.0
         var smoothFactor: CGFloat = 0.24
@@ -42,11 +42,10 @@ final class AudioLevelMeter: ObservableObject {
         let center = CGFloat(max(1, config.barCount - 1)) / 2
         for index in levels.indices {
             let distance = abs(CGFloat(index) - center) / max(1, center)
-            let attenuation = 1 - (distance * 0.35)
-            let jitter = CGFloat.random(in: -0.04...0.04)
-            let target = config.minLevel + (smoothed * attenuation) + jitter
+            let attenuation = max(0.18, 1 - (distance * 0.72))
+            let target = config.minLevel + (smoothed * attenuation)
             let clamped = max(config.minLevel, min(config.maxLevel, target))
-            levels[index] = levels[index] * 0.68 + clamped * 0.32
+            levels[index] = levels[index] * 0.74 + clamped * 0.26
         }
     }
 }

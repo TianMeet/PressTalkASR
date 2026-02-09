@@ -3,6 +3,22 @@ import Combine
 
 @MainActor
 final class AppSettings: ObservableObject {
+    enum TranscriptionRoute: String, CaseIterable, Identifiable {
+        case uploadStreaming = "uploadStreaming"
+        case realtime = "realtime"
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .uploadStreaming:
+                return "Upload Streaming"
+            case .realtime:
+                return "Realtime"
+            }
+        }
+    }
+
     enum APIKeySource {
         case localCache
         case environment
@@ -39,6 +55,9 @@ final class AppSettings: ObservableObject {
         static let requireSpeechBeforeAutoStop = "requireSpeechBeforeAutoStop"
         static let speechActivateThresholdDB = "speechActivateThresholdDB"
         static let autoStopDebugLogs = "autoStopDebugLogs"
+        static let transcriptionRouteRawValue = "transcriptionRouteRawValue"
+        static let realtimeSilenceDurationMs = "realtimeSilenceDurationMs"
+        static let realtimePrefixPaddingMs = "realtimePrefixPaddingMs"
         static let modelRawValue = "modelRawValue"
         static let customPrompt = "customPrompt"
         static let promptEnabled = "promptEnabled"
@@ -89,6 +108,18 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(autoStopDebugLogs, forKey: Keys.autoStopDebugLogs) }
     }
 
+    @Published var transcriptionRouteRawValue: String {
+        didSet { defaults.set(transcriptionRouteRawValue, forKey: Keys.transcriptionRouteRawValue) }
+    }
+
+    @Published var realtimeSilenceDurationMs: Double {
+        didSet { defaults.set(realtimeSilenceDurationMs, forKey: Keys.realtimeSilenceDurationMs) }
+    }
+
+    @Published var realtimePrefixPaddingMs: Double {
+        didSet { defaults.set(realtimePrefixPaddingMs, forKey: Keys.realtimePrefixPaddingMs) }
+    }
+
     @Published var selectedModelRawValue: String {
         didSet { defaults.set(selectedModelRawValue, forKey: Keys.modelRawValue) }
     }
@@ -123,6 +154,9 @@ final class AppSettings: ObservableObject {
         requireSpeechBeforeAutoStop = defaults.object(forKey: Keys.requireSpeechBeforeAutoStop) as? Bool ?? true
         speechActivateThresholdDB = AppSettings.floatValue(defaults: defaults, key: Keys.speechActivateThresholdDB, fallback: -32)
         autoStopDebugLogs = defaults.object(forKey: Keys.autoStopDebugLogs) as? Bool ?? false
+        transcriptionRouteRawValue = defaults.string(forKey: Keys.transcriptionRouteRawValue) ?? TranscriptionRoute.uploadStreaming.rawValue
+        realtimeSilenceDurationMs = AppSettings.doubleValue(defaults: defaults, key: Keys.realtimeSilenceDurationMs, fallback: 600)
+        realtimePrefixPaddingMs = AppSettings.doubleValue(defaults: defaults, key: Keys.realtimePrefixPaddingMs, fallback: 240)
         selectedModelRawValue = defaults.string(forKey: Keys.modelRawValue) ?? OpenAIModel.gpt4oMiniTranscribe.rawValue
         customPrompt = defaults.string(forKey: Keys.customPrompt) ?? ""
         promptEnabled = defaults.object(forKey: Keys.promptEnabled) as? Bool ?? true
@@ -137,9 +171,25 @@ final class AppSettings: ObservableObject {
         set { selectedModelRawValue = newValue.rawValue }
     }
 
+    var transcriptionRoute: TranscriptionRoute {
+        get { TranscriptionRoute(rawValue: transcriptionRouteRawValue) ?? .uploadStreaming }
+        set { transcriptionRouteRawValue = newValue.rawValue }
+    }
+
     var languageMode: LanguageMode {
         get { LanguageMode(rawValue: languageModeRawValue) ?? .auto }
         set { languageModeRawValue = newValue.rawValue }
+    }
+
+    var preferredLanguageCode: String? {
+        switch languageMode {
+        case .auto:
+            return nil
+        case .chinese:
+            return "zh"
+        case .english:
+            return "en"
+        }
     }
 
     func resolvedAPIKey() -> String? {
@@ -183,6 +233,13 @@ final class AppSettings: ObservableObject {
             requireSpeechBeforeAutoStop: requireSpeechBeforeAutoStop,
             speechActivateDB: speechActivateThresholdDB,
             emaAlpha: 0.2
+        )
+    }
+
+    var realtimeConfiguration: RealtimeTranscribeClient.Configuration {
+        RealtimeTranscribeClient.Configuration(
+            silenceDurationMs: Int(realtimeSilenceDurationMs),
+            prefixPaddingMs: Int(realtimePrefixPaddingMs)
         )
     }
 

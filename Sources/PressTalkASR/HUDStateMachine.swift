@@ -5,7 +5,7 @@ import SwiftUI
 enum HUDMode: Equatable {
     case hidden
     case listening
-    case transcribing
+    case transcribing(String)
     case success(String)
     case error(String)
 }
@@ -41,7 +41,14 @@ final class HUDStateMachine: ObservableObject {
     }
 
     func showTranscribing() {
-        transition(to: .transcribing)
+        transition(to: .transcribing(""))
+    }
+
+    func updateTranscribingPreview(_ text: String) {
+        guard case .transcribing = mode else { return }
+        mode = .transcribing(text)
+        transitionID = UUID()
+        onModeChanged?(mode)
     }
 
     func showSuccess(_ text: String) {

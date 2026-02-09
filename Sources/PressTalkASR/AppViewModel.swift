@@ -1,6 +1,12 @@
 import Foundation
 import Combine
+import os
 import SwiftUI
+
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.xingkong.PressTalkASR",
+    category: "AppViewModel"
+)
 
 @MainActor
 final class AppViewModel: ObservableObject {
@@ -54,6 +60,19 @@ final class AppViewModel: ObservableObject {
         case autoSilence
     }
 
+    private enum Constants {
+        /// 录音最短有效时长
+        static let minimumRecordingSeconds: TimeInterval = 0.2
+        /// 转写预览增量刷新节流间隔
+        static let previewThrottleNs: UInt64 = 80_000_000       // 80 ms
+        /// 静音自动结束触发前延迟
+        static let autoStopDebounceNs: UInt64 = 80_000_000      // 80 ms
+        /// 音频文件轮询最小有效字节数
+        static let fileStabilityMinBytes = 1024
+        /// Debug 日志最小输出间隔
+        static let debugLogMinInterval: TimeInterval = 0.15
+    }
+
     @Published private(set) var isRecording = false
     @Published private(set) var isTranscribing = false
     @Published private(set) var lastMessage = ""
@@ -66,9 +85,9 @@ final class AppViewModel: ObservableObject {
     private let audioRecorder = AudioRecorder()
     private let vadTrimmer = VADTrimmer()
     private let transcribeClient = OpenAITranscribeClient()
+    private let realtimeTranscribeClient = RealtimeTranscribeClient()
     private let hudPresenter = HUDPresenter()
     private var settingsWindowController: SettingsWindowController?
-    private let minimumRecordingSeconds: TimeInterval = 0.2
 
     private var transcribeTask: Task<Void, Never>?
     private var pendingAutoStopTask: Task<Void, Never>?
@@ -78,6 +97,8 @@ final class AppViewModel: ObservableObject {
     private var isStoppingRecording = false
     private var hasAutoStopFiredForSession = false
     private var lastAutoStopLogTime = Date.distantPast
+    private var pendingPreviewText = ""
+    private var previewFlushTask: Task<Void, Never>?
 
     var menuBarIconName: String {
         if isRecording { return "mic.fill" }
@@ -117,11 +138,11 @@ final class AppViewModel: ObservableObject {
         }
 
         settings.$autoPasteEnabled
-            .combineLatest(settings.$selectedModelRawValue)
-            .sink { [weak self] autoPaste, model in
+            .combineLatest(settings.$selectedModelRawValue, settings.$languageModeRawValue)
+            .sink { [weak self] autoPaste, model, language in
                 self?.hudPresenter.updateDisplaySettings(
                     autoPasteEnabled: autoPaste,
-                    languageMode: "Auto",
+                    languageMode: language,
                     modelMode: model
                 )
             }
@@ -198,11 +219,22 @@ final class AppViewModel: ObservableObject {
             recordingStartedAt = Date()
             isStoppingRecording = false
             hasAutoStopFiredForSession = false
+            previewFlushTask?.cancel()
+            previewFlushTask = nil
+            pendingPreviewText = ""
 
             _ = try audioRecorder.startRecording()
             isRecording = true
             lastMessage = "Listening…"
             hudPresenter.showListening()
+
+            // 录音期间预热 TLS 连接，减少转写上传时的握手延迟
+            switch settings.transcriptionRoute {
+            case .uploadStreaming:
+                transcribeClient.prewarmConnection()
+            case .realtime:
+                realtimeTranscribeClient.prewarmConnection()
+            }
         } catch {
             showError("录音启动失败：\(error.localizedDescription)")
         }
@@ -236,12 +268,15 @@ final class AppViewModel: ObservableObject {
         isRecording = false
         isStoppingRecording = false
         recordingStartedAt = nil
+        previewFlushTask?.cancel()
+        previewFlushTask = nil
+        pendingPreviewText = ""
         isTranscribing = true
         lastMessage = "Transcribing…"
         hudPresenter.showTranscribing()
 
         let recordedSeconds = audioRecorder.lastDuration
-        if recordedSeconds < minimumRecordingSeconds {
+        if recordedSeconds < Constants.minimumRecordingSeconds {
             isTranscribing = false
             showError(WorkflowError.recordingTooShort.localizedDescription)
             return
@@ -280,7 +315,7 @@ final class AppViewModel: ObservableObject {
         guard shouldAutoStop, !hasAutoStopFiredForSession else { return }
 
         pendingAutoStopTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 80_000_000)
+            try? await Task.sleep(nanoseconds: Constants.autoStopDebounceNs)
             guard !Task.isCancelled else { return }
             await self?.stopAndTranscribe(trigger: .autoSilence)
         }
@@ -288,20 +323,19 @@ final class AppViewModel: ObservableObject {
 
     private func maybePrintAutoStopDebug(_ info: SilenceAutoStopDetector.DebugInfo) {
         let now = Date()
-        guard now.timeIntervalSince(lastAutoStopLogTime) >= 0.15 || info.shouldAutoStop else { return }
+        guard now.timeIntervalSince(lastAutoStopLogTime) >= Constants.debugLogMinInterval || info.shouldAutoStop else { return }
         lastAutoStopLogTime = now
 
-        print(
-            String(
-                format: "[AutoStop] db=%.1f ema=%.1f silence=%.0fms spoken=%@ elapsed=%.0fms trigger=%@",
-                info.dbInstant,
-                info.dbEma,
-                info.silenceAccumMs,
-                info.hasSpoken ? "Y" : "N",
-                info.recordingElapsedMs,
-                info.shouldAutoStop ? "Y" : "N"
-            )
+        let message = String(
+            format: "[AutoStop] db=%.1f ema=%.1f silence=%.0fms spoken=%@ elapsed=%.0fms trigger=%@",
+            info.dbInstant,
+            info.dbEma,
+            info.silenceAccumMs,
+            info.hasSpoken ? "Y" : "N",
+            info.recordingElapsedMs,
+            info.shouldAutoStop ? "Y" : "N"
         )
+        logger.debug("\(message, privacy: .public)")
     }
 
     private func runTranscription(sourceURL: URL, recordedSeconds: TimeInterval) async {
@@ -313,7 +347,15 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
-            guard await waitForStableAudioFile(at: sourceURL) else {
+            // Fail fast: check API key before doing any audio processing.
+            guard let apiKey = settings.resolvedAPIKey() else {
+                throw WorkflowError.missingAPIKey
+            }
+
+            // AVAudioRecorder.stop() is synchronous — file is ready immediately.
+            // No need for polling; just verify the file exists and has content.
+            let fileSize = (try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard fileSize > Constants.fileStabilityMinBytes else {
                 throw WorkflowError.audioFileNotReady
             }
 
@@ -325,18 +367,57 @@ final class AppViewModel: ObservableObject {
                 }
             }
 
-            guard let apiKey = settings.resolvedAPIKey() else {
-                throw WorkflowError.missingAPIKey
+            let promptToSend = settings.effectivePrompt(forRecordingSeconds: recordedSeconds)
+            let text: String
+            switch settings.transcriptionRoute {
+            case .uploadStreaming:
+                text = try await transcribeClient.transcribeWithStreamingFallback(
+                    fileURL: requestURL,
+                    model: settings.selectedModel,
+                    prompt: promptToSend,
+                    languageCode: settings.preferredLanguageCode,
+                    apiKey: apiKey,
+                    onDelta: { [weak self] preview in
+                        Task { @MainActor in
+                            self?.enqueueTranscriptionPreview(preview)
+                        }
+                    }
+                )
+
+            case .realtime:
+                do {
+                    text = try await realtimeTranscribeClient.transcribe(
+                        fileURL: requestURL,
+                        model: settings.selectedModel,
+                        prompt: promptToSend,
+                        languageCode: settings.preferredLanguageCode,
+                        apiKey: apiKey,
+                        config: settings.realtimeConfiguration,
+                        onDelta: { [weak self] preview in
+                            Task { @MainActor in
+                                self?.enqueueTranscriptionPreview(preview)
+                            }
+                        }
+                    )
+                } catch {
+                    text = try await transcribeClient.transcribeWithStreamingFallback(
+                        fileURL: requestURL,
+                        model: settings.selectedModel,
+                        prompt: promptToSend,
+                        languageCode: settings.preferredLanguageCode,
+                        apiKey: apiKey,
+                        onDelta: { [weak self] preview in
+                            Task { @MainActor in
+                                self?.enqueueTranscriptionPreview(preview)
+                            }
+                        }
+                    )
+                }
             }
 
-            let promptToSend = settings.effectivePrompt(forRecordingSeconds: recordedSeconds)
-            let text = try await transcribeClient.transcribe(
-                fileURL: requestURL,
-                model: settings.selectedModel,
-                prompt: promptToSend,
-                apiKey: apiKey
-            )
-
+            previewFlushTask?.cancel()
+            previewFlushTask = nil
+            pendingPreviewText = ""
             ClipboardManager.copyToPasteboard(text)
             lastMessage = text
             hudPresenter.showSuccess(text)
@@ -355,32 +436,30 @@ final class AppViewModel: ObservableObject {
             costTracker.add(seconds: recordedSeconds)
             isTranscribing = false
         } catch {
+            previewFlushTask?.cancel()
+            previewFlushTask = nil
+            pendingPreviewText = ""
             showError(error.localizedDescription)
             isTranscribing = false
         }
     }
 
-    private func waitForStableAudioFile(at url: URL) async -> Bool {
-        var previousSize = -1
-        var stableCount = 0
+    private func enqueueTranscriptionPreview(_ text: String) {
+        pendingPreviewText = text
+        guard previewFlushTask == nil else { return }
 
-        for _ in 0..<8 {
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            if size > 1024 {
-                if size == previousSize {
-                    stableCount += 1
-                } else {
-                    stableCount = 0
-                }
-                if stableCount >= 1 {
-                    return true
-                }
-            }
-            previousSize = size
-            try? await Task.sleep(nanoseconds: 70_000_000)
+        previewFlushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Constants.previewThrottleNs)
+            guard let self else { return }
+
+            let latest = self.pendingPreviewText
+            self.pendingPreviewText = ""
+            self.previewFlushTask = nil
+
+            guard self.isTranscribing else { return }
+            self.lastMessage = latest
+            self.hudPresenter.updateTranscribingPreview(latest)
         }
-
-        return false
     }
 
     func saveAPIKey(_ value: String) -> String {

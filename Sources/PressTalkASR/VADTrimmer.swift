@@ -139,6 +139,15 @@ struct VADTrimmer: Sendable {
             )
             try outputFile.write(from: trimmedBuffer)
 
+            // If the trimmed WAV is larger than the original compressed file
+            // (e.g. m4a/AAC input), prefer the original — smaller upload = faster.
+            let originalSize = (try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let trimmedSize = (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if trimmedSize >= originalSize && originalSize > 0 {
+                try? FileManager.default.removeItem(at: outputURL)
+                return inputURL
+            }
+
             return outputURL
         }.value
     }
