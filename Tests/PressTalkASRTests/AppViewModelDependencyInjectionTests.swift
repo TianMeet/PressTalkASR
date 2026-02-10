@@ -424,6 +424,7 @@ private final class MockHUDPresenter: HUDPresenting {
     func updateHUDAnchor(_ anchor: HUDAnchorPosition) {
         updatedAnchors.append(anchor)
     }
+    func updateRecordingElapsed(_ seconds: Int) {}
     func updateRMS(_ rms: Float) {}
     func showListening() {}
     func showTranscribing() {

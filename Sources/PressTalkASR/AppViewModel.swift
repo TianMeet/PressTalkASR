@@ -140,11 +140,14 @@ final class AppViewModel: ObservableObject {
         static let autoStopDebounceNs: UInt64 = 80_000_000      // 80 ms
         /// Debug 日志最小输出间隔
         static let debugLogMinInterval: TimeInterval = 0.15
+        /// 统一录音计时刷新间隔
+        static let recordingElapsedTickSeconds: TimeInterval = 1
     }
 
     @Published private(set) var sessionPhase: SessionPhase = .idle
     @Published private(set) var isRecording = false
     @Published private(set) var isTranscribing = false
+    @Published private(set) var recordingElapsedSeconds: Int = 0
     @Published private(set) var lastMessage = ""
     @Published private(set) var popoverFeedback: PopoverFeedback = .none
 
@@ -164,6 +167,8 @@ final class AppViewModel: ObservableObject {
     private var activeTranscriptionToken: UUID?
     private var pendingAutoStopTask: Task<Void, Never>?
     private var pendingMaxDurationTask: Task<Void, Never>?
+    private var recordingElapsedTimer: DispatchSourceTimer?
+    private var recordingStartedUptime: TimeInterval?
     private var cancellables = Set<AnyCancellable>()
     private var lastAutoStopLogTime = Date.distantPast
     private let maxRecordingDurationSeconds: TimeInterval
@@ -251,6 +256,10 @@ final class AppViewModel: ObservableObject {
         registerConfiguredHotkeyOrFallback()
     }
 
+    deinit {
+        recordingElapsedTimer?.cancel()
+    }
+
     func toggleManualRecording() async {
         if isRecording {
             await stopAndTranscribe(trigger: .manual)
@@ -319,6 +328,9 @@ final class AppViewModel: ObservableObject {
         sessionPhase = phase
         isRecording = phase.isRecording
         isTranscribing = phase.isTranscribing
+        if !phase.isRecording {
+            stopRecordingElapsedTimer(reset: true)
+        }
     }
 
     private func startListening() async {
@@ -342,6 +354,7 @@ final class AppViewModel: ObservableObject {
             transition(to: .listening)
             lastMessage = L10n.tr("status.listening_ellipsis")
             hudPresenter.showListening()
+            startRecordingElapsedTimer()
             scheduleMaxRecordingGuard()
 
             // 录音开始即进入短周期连接保温，降低松开后冷连接概率。
@@ -437,6 +450,43 @@ final class AppViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             await self?.stopAndTranscribe(trigger: .maxDuration)
         }
+    }
+
+    private func startRecordingElapsedTimer() {
+        stopRecordingElapsedTimer(reset: true)
+        let startedUptime = ProcessInfo.processInfo.systemUptime
+        recordingStartedUptime = startedUptime
+        setRecordingElapsedSeconds(0)
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(
+            deadline: .now() + Constants.recordingElapsedTickSeconds,
+            repeating: Constants.recordingElapsedTickSeconds
+        )
+        timer.setEventHandler { [weak self] in
+            guard let self, let started = self.recordingStartedUptime else { return }
+            let elapsed = max(0, ProcessInfo.processInfo.systemUptime - started)
+            self.setRecordingElapsedSeconds(Int(elapsed))
+        }
+        timer.resume()
+        recordingElapsedTimer = timer
+    }
+
+    private func stopRecordingElapsedTimer(reset: Bool) {
+        recordingElapsedTimer?.cancel()
+        recordingElapsedTimer = nil
+        recordingStartedUptime = nil
+        if reset {
+            setRecordingElapsedSeconds(0)
+        }
+    }
+
+    private func setRecordingElapsedSeconds(_ seconds: Int) {
+        let clamped = max(0, seconds)
+        if recordingElapsedSeconds != clamped {
+            recordingElapsedSeconds = clamped
+        }
+        hudPresenter.updateRecordingElapsed(clamped)
     }
 
     private func maybePrintAutoStopDebug(_ info: SilenceAutoStopDetector.DebugInfo) {

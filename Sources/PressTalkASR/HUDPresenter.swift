@@ -72,6 +72,10 @@ final class HUDPresenter {
         window.setAnchorPosition(anchor)
     }
 
+    func updateRecordingElapsed(_ seconds: Int) {
+        stateMachine.updateRecordingElapsed(seconds)
+    }
+
     func updateRMS(_ rms: Float) {
         levelMeter.ingestRMS(rms)
     }

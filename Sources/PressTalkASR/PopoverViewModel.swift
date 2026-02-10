@@ -34,7 +34,6 @@ final class PopoverViewModel: ObservableObject {
 
     private let appViewModel: AppViewModel
     private var cancellables = Set<AnyCancellable>()
-    private var recordingTimer: DispatchSourceTimer?
     private var metricsTimer: DispatchSourceTimer?
     private var permissionTimer: DispatchSourceTimer?
     private var resetTask: Task<Void, Never>?
@@ -52,7 +51,6 @@ final class PopoverViewModel: ObservableObject {
     }
 
     deinit {
-        recordingTimer?.cancel()
         metricsTimer?.cancel()
         permissionTimer?.cancel()
         resetTask?.cancel()
@@ -251,6 +249,12 @@ final class PopoverViewModel: ObservableObject {
                 self?.handleFeedback(feedback)
             }
             .store(in: &cancellables)
+
+        appViewModel.$recordingElapsedSeconds
+            .sink { [weak self] elapsed in
+                self?.recordingElapsedSeconds = elapsed
+            }
+            .store(in: &cancellables)
     }
 
     private func bindLifecycleEvents() {
@@ -267,13 +271,10 @@ final class PopoverViewModel: ObservableObject {
             transientLock = false
             showAccessibilityHint = false
             setState(.recording)
-            startRecordingTimer()
         case .transcribing:
-            stopRecordingTimer()
             transientLock = false
             setState(.transcribing)
         case .idle:
-            stopRecordingTimer()
             if !transientLock {
                 setState(.idle)
             }
@@ -319,24 +320,6 @@ final class PopoverViewModel: ObservableObject {
                 self.setState(.idle)
             }
         }
-    }
-
-    private func startRecordingTimer() {
-        guard recordingTimer == nil else { return }
-        recordingElapsedSeconds = 0
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 1, repeating: 1)
-        timer.setEventHandler { [weak self] in
-            self?.recordingElapsedSeconds += 1
-        }
-        timer.resume()
-        recordingTimer = timer
-    }
-
-    private func stopRecordingTimer() {
-        recordingTimer?.cancel()
-        recordingTimer = nil
-        recordingElapsedSeconds = 0
     }
 
     private func startMetricsTimer() {

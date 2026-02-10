@@ -39,7 +39,6 @@ final class HUDStateMachine: ObservableObject {
     var onModeChanged: ((HUDMode) -> Void)?
 
     private let autoDismiss: AutoDismiss
-    private var elapsedTimer: DispatchSourceTimer?
     private var dismissTask: Task<Void, Never>?
     private var dismissStartedAt: Date?
     private var dismissDelay: TimeInterval?
@@ -51,7 +50,6 @@ final class HUDStateMachine: ObservableObject {
 
     func showListening() {
         transition(to: .listening)
-        startListeningTimer()
     }
 
     func showTranscribing() {
@@ -76,13 +74,19 @@ final class HUDStateMachine: ObservableObject {
     }
 
     func dismiss() {
-        stopListeningTimer()
         cancelDismissTask()
         withAnimation(.timingCurve(0.22, 0.61, 0.36, 1.0, duration: Animation.dismissDuration)) {
             mode = .hidden
             transitionID = UUID()
         }
         onModeChanged?(.hidden)
+    }
+
+    func updateRecordingElapsed(_ seconds: Int) {
+        guard case .listening = mode else { return }
+        let clamped = max(0, seconds)
+        guard elapsedSeconds != clamped else { return }
+        elapsedSeconds = clamped
     }
 
     func setHovering(_ hovering: Bool) {
@@ -103,7 +107,6 @@ final class HUDStateMachine: ObservableObject {
     }
 
     private func transition(to newMode: HUDMode) {
-        stopListeningTimer()
         cancelDismissTask()
         elapsedSeconds = 0
         dismissStartedAt = nil
@@ -115,25 +118,6 @@ final class HUDStateMachine: ObservableObject {
             transitionID = UUID()
         }
         onModeChanged?(newMode)
-    }
-
-    private func startListeningTimer() {
-        stopListeningTimer()
-        elapsedSeconds = 0
-
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 1, repeating: 1)
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.elapsedSeconds += 1
-        }
-        timer.resume()
-        elapsedTimer = timer
-    }
-
-    private func stopListeningTimer() {
-        elapsedTimer?.cancel()
-        elapsedTimer = nil
     }
 
     private func scheduleDismiss(after delay: TimeInterval) {
