@@ -110,7 +110,6 @@ final class AppViewModel: ObservableObject {
     enum WorkflowError: LocalizedError {
         case missingAPIKey
         case recordingTooShort
-        case audioFileNotReady
 
         var errorDescription: String? {
             switch self {
@@ -118,8 +117,6 @@ final class AppViewModel: ObservableObject {
                 return "未找到 API Key，请在 Settings 中输入并保存。"
             case .recordingTooShort:
                 return "录音太短，请按住至少 0.2 秒再松开。"
-            case .audioFileNotReady:
-                return "音频文件尚未准备好，请稍后再试。"
             }
         }
     }
@@ -134,17 +131,8 @@ final class AppViewModel: ObservableObject {
         static let minimumRecordingSeconds: TimeInterval = 0.2
         /// 转写预览增量刷新节流间隔
         static let previewThrottleSeconds: TimeInterval = 0.08   // 80 ms
-        /// 速度优先：短音频默认跳过本地 VAD Trim
-        static let trimMinDurationSecondsForUpload: TimeInterval = 1.2
-        /// 压缩格式通常上传更快，只有较长录音才尝试 trim 以避免本地预处理过慢。
-        static let trimMinDurationSecondsForCompressed: TimeInterval = 8.0
-        /// VAD trim 仅允许占用有限预算，避免拖慢 TTFT。
-        static let trimBudgetNs: UInt64 = 220_000_000 // 220 ms
-        static let compressedAudioExtensions: Set<String> = ["m4a", "mp3", "mpga", "mp4", "mpeg", "webm", "ogg", "flac"]
         /// 静音自动结束触发前延迟
         static let autoStopDebounceNs: UInt64 = 80_000_000      // 80 ms
-        /// 音频文件轮询最小有效字节数
-        static let fileStabilityMinBytes = 1024
         /// Debug 日志最小输出间隔
         static let debugLogMinInterval: TimeInterval = 0.15
     }
@@ -155,14 +143,15 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var lastMessage = ""
     @Published private(set) var popoverFeedback: PopoverFeedback = .none
 
-    let settings = AppSettings()
-    let costTracker = CostTracker()
+    let settings: AppSettings
+    let costTracker: CostTracker
 
-    private let hotkeyManager = HotkeyManager()
-    private let audioRecorder = AudioRecorder()
-    private let vadTrimmer = VADTrimmer()
-    private let transcribeClient = OpenAITranscribeClient()
-    private let hudPresenter = HUDPresenter()
+    private let hotkeyManager: any HotkeyManaging
+    private let audioRecorder: any AudioRecordingServicing
+    private let transcribeClient: any TranscriptionServicing
+    private let hudPresenter: any HUDPresenting
+    private let clipboardService: any ClipboardManaging
+    private let transcriptionCoordinator: TranscriptionCoordinator
     private var settingsWindowController: SettingsWindowController?
 
     private var transcribeTask: Task<Void, Never>?
@@ -182,7 +171,28 @@ final class AppViewModel: ObservableObject {
         SessionStatus(phase: sessionPhase)
     }
 
-    init() {
+    init(
+        settings: AppSettings = AppSettings(),
+        costTracker: CostTracker = CostTracker(),
+        hotkeyManager: any HotkeyManaging = HotkeyManager(),
+        audioRecorder: any AudioRecordingServicing = AudioRecorder(),
+        vadTrimmer: any SilenceTrimming = VADTrimmer(),
+        transcribeClient: any TranscriptionServicing = OpenAITranscribeClient(),
+        hudPresenter: any HUDPresenting = HUDPresenter(),
+        clipboardService: any ClipboardManaging = SystemClipboardService()
+    ) {
+        self.settings = settings
+        self.costTracker = costTracker
+        self.hotkeyManager = hotkeyManager
+        self.audioRecorder = audioRecorder
+        self.transcribeClient = transcribeClient
+        self.hudPresenter = hudPresenter
+        self.clipboardService = clipboardService
+        self.transcriptionCoordinator = TranscriptionCoordinator(
+            transcribeClient: transcribeClient,
+            vadTrimmer: vadTrimmer
+        )
+
         audioRecorder.onMeterSample = { [weak self] sample in
             guard let self else { return }
             self.hudPresenter.updateRMS(sample.rms)
@@ -405,12 +415,9 @@ final class AppViewModel: ObservableObject {
         let transcriptionStartedAt = Date()
         let deltaTimingProbe = DeltaTimingProbe()
         let previewCoalescer = PreviewDeltaCoalescer(interval: Constants.previewThrottleSeconds)
-        var urlsToDelete = [sourceURL]
-        var requestURL = sourceURL
 
         defer {
             previewCoalescer.reset()
-            urlsToDelete.forEach { try? FileManager.default.removeItem(at: $0) }
         }
 
         do {
@@ -419,33 +426,17 @@ final class AppViewModel: ObservableObject {
                 throw WorkflowError.missingAPIKey
             }
 
-            // AVAudioRecorder.stop() is synchronous — file is ready immediately.
-            // No need for polling; just verify the file exists and has content.
-            let fileSize = (try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard fileSize > Constants.fileStabilityMinBytes else {
-                throw WorkflowError.audioFileNotReady
-            }
-
-            let sourceExtension = sourceURL.pathExtension.lowercased()
-            let isCompressedSource = Constants.compressedAudioExtensions.contains(sourceExtension)
-            let shouldRunTrimForSpeed = settings.enableVADTrim
-                && recordedSeconds >= Constants.trimMinDurationSecondsForUpload
-                && (!isCompressedSource || recordedSeconds >= Constants.trimMinDurationSecondsForCompressed)
-
-            if shouldRunTrimForSpeed {
-                let trimmedURL = await trimSilenceBestEffort(inputURL: sourceURL)
-                if trimmedURL != sourceURL {
-                    requestURL = trimmedURL
-                    urlsToDelete.append(trimmedURL)
-                }
-            }
-
-            let promptToSend = settings.effectivePrompt(forRecordingSeconds: recordedSeconds)
-            let text = try await transcribeClient.transcribe(
-                fileURL: requestURL,
+            let options = TranscriptionRequestOptions(
+                enableVADTrim: settings.enableVADTrim,
                 model: settings.selectedModel,
-                prompt: promptToSend,
-                languageCode: settings.preferredLanguageCode,
+                prompt: settings.effectivePrompt(forRecordingSeconds: recordedSeconds),
+                languageCode: settings.preferredLanguageCode
+            )
+
+            let text = try await transcriptionCoordinator.transcribe(
+                sourceURL: sourceURL,
+                recordedSeconds: recordedSeconds,
+                options: options,
                 apiKey: apiKey,
                 onDelta: { [weak self] preview in
                     deltaTimingProbe.markFirstDeltaIfNeeded()
@@ -467,14 +458,14 @@ final class AppViewModel: ObservableObject {
                 error: nil
             )
 
-            ClipboardManager.copyToPasteboard(text)
+            clipboardService.copyToPasteboard(text)
             lastMessage = text
             hudPresenter.showSuccess(text)
             popoverFeedback = .success("Copied")
 
             if settings.autoPasteEnabled {
                 do {
-                    try ClipboardManager.autoPaste()
+                    try clipboardService.autoPaste()
                 } catch {
                     popoverFeedback = .warning("已复制，自动粘贴失败")
                     logger.notice("Auto-paste failed after copy: \(error.localizedDescription, privacy: .public)")
@@ -514,29 +505,6 @@ final class AppViewModel: ObservableObject {
             totalMs
         )
         logger.notice("\(message, privacy: .public)")
-    }
-
-    private func trimSilenceBestEffort(inputURL: URL) async -> URL {
-        let trimmer = vadTrimmer
-        do {
-            return try await withThrowingTaskGroup(of: URL.self) { group in
-                group.addTask {
-                    try await trimmer.trimSilence(inputURL: inputURL)
-                }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: Constants.trimBudgetNs)
-                    return inputURL
-                }
-                let chosen = try await group.next() ?? inputURL
-                group.cancelAll()
-                return chosen
-            }
-        } catch is CancellationError {
-            return inputURL
-        } catch {
-            logger.debug("VAD trim skipped: \(error.localizedDescription, privacy: .public)")
-            return inputURL
-        }
     }
 
     func saveAPIKey(_ value: String) -> String {
