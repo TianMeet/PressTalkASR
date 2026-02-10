@@ -17,6 +17,12 @@ struct PopoverRootView: View {
         }
         .padding(15)
         .frame(width: 340)
+        .onAppear {
+            viewModel.handlePopoverAppear()
+        }
+        .onDisappear {
+            viewModel.handlePopoverDisappear()
+        }
     }
 
     private var headerSection: some View {

@@ -49,8 +49,6 @@ final class PopoverViewModel: ObservableObject {
         refreshMetrics()
         refreshPermissions()
         refreshHotkeyDisplay()
-        startMetricsTimer()
-        startPermissionTimer()
     }
 
     deinit {
@@ -189,6 +187,19 @@ final class PopoverViewModel: ObservableObject {
 
     func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    func handlePopoverAppear() {
+        refreshMetrics()
+        refreshPermissions()
+        refreshHotkeyDisplay()
+        startMetricsTimer()
+        startPermissionTimer()
+    }
+
+    func handlePopoverDisappear() {
+        stopMetricsTimer()
+        stopPermissionTimer()
     }
 
     private func bindSettings() {
@@ -346,6 +357,7 @@ final class PopoverViewModel: ObservableObject {
     }
 
     private func startMetricsTimer() {
+        guard metricsTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Constants.metricsRefreshInterval, repeating: Constants.metricsRefreshInterval)
         timer.setEventHandler { [weak self] in
@@ -355,7 +367,13 @@ final class PopoverViewModel: ObservableObject {
         metricsTimer = timer
     }
 
+    private func stopMetricsTimer() {
+        metricsTimer?.cancel()
+        metricsTimer = nil
+    }
+
     private func startPermissionTimer() {
+        guard permissionTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Constants.permissionRefreshInterval, repeating: Constants.permissionRefreshInterval)
         timer.setEventHandler { [weak self] in
@@ -363,6 +381,11 @@ final class PopoverViewModel: ObservableObject {
         }
         timer.resume()
         permissionTimer = timer
+    }
+
+    private func stopPermissionTimer() {
+        permissionTimer?.cancel()
+        permissionTimer = nil
     }
 
     private func refreshMetrics() {
