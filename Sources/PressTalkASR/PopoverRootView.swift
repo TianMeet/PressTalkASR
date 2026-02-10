@@ -205,7 +205,7 @@ struct PopoverRootView: View {
     }
 
     private var miniRecordingBars: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
             HStack(spacing: 4) {
                 ForEach(0..<10, id: \.self) { index in

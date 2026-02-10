@@ -273,7 +273,7 @@ private struct AudioDotWaveView: View {
     let color: Color
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let energy = max(0, min(1, normalizedEnergy))
             let phase = timeline.date.timeIntervalSinceReferenceDate
 
