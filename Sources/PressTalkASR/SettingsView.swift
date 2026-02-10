@@ -63,7 +63,7 @@ struct SettingsView: View {
         }
         .background(
             LinearGradient(
-                colors: [Color.white, Color(red: 0.95, green: 0.97, blue: 0.99)],
+                colors: [Color(nsColor: .windowBackgroundColor), Color(nsColor: .underPageBackgroundColor)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -187,11 +187,11 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.9))
+                .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.8)
         )
     }
 

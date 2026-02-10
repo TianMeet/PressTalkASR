@@ -40,11 +40,11 @@ struct SettingsAPIModelCard: View {
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.white.opacity(0.9))
+                                    .fill(Color(nsColor: .controlBackgroundColor))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.black.opacity(0.12), lineWidth: 0.8)
+                                    .stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.8)
                             )
                         } else {
                             SecureField(L10n.tr("settings.api_key.placeholder"), text: $apiKeyInput)
@@ -112,11 +112,11 @@ struct SettingsAPIModelCard: View {
                         .padding(6)
                         .background(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.white.opacity(0.9))
+                                .fill(Color(nsColor: .textBackgroundColor))
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
+                                .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.8)
                         )
 
                     Toggle(L10n.tr("settings.prompt.enable"), isOn: $settings.promptEnabled)
@@ -169,11 +169,11 @@ struct SettingsAPIModelCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(selected ? UITheme.successColor.opacity(0.16) : Color.white.opacity(0.85))
+                .fill(selected ? UITheme.successColor.opacity(0.16) : Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(selected ? UITheme.successColor.opacity(0.35) : Color.black.opacity(0.07), lineWidth: 0.8)
+                .stroke(selected ? UITheme.successColor.opacity(0.35) : Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 0.8)
         )
     }
 
