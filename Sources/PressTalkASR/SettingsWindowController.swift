@@ -7,17 +7,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static let didCloseNotification = Notification.Name("SettingsWindowController.didClose")
 
     private var hasBeenShown = false
+    private enum Layout {
+        static let initialSize = NSSize(width: 900, height: 720)
+        static let minSize = NSSize(width: 760, height: 640)
+        static let maxSize = NSSize(width: 1100, height: 960)
+    }
 
     init(viewModel: AppViewModel, settings: AppSettings, costTracker: CostTracker) {
         let rootView = SettingsView(viewModel: viewModel, settings: settings, costTracker: costTracker)
-            .frame(width: 620, height: 660)
+            .frame(width: Layout.initialSize.width, height: Layout.initialSize.height)
 
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.title = L10n.tr("settings.window.title")
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 620, height: 660))
-        window.minSize = NSSize(width: 620, height: 620)
+        window.setContentSize(Layout.initialSize)
+        window.minSize = Layout.minSize
+        window.maxSize = Layout.maxSize
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
 

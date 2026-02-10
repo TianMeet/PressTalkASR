@@ -11,20 +11,22 @@ struct SettingsBehaviorCard: View {
     let onStopHotkeyCapture: () -> Void
 
     var body: some View {
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 12) {
+        SettingsCard(accent: UITheme.electricBlue.opacity(0.85)) {
+            VStack(alignment: .leading, spacing: 14) {
                 cardTitle(L10n.tr("settings.card.behavior"), "switch.2")
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(L10n.tr("settings.hotkey.title"))
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
                             Text(L10n.tr("settings.hotkey.subtitle"))
-                                .font(.system(size: 11))
+                                .font(.system(size: 11.5, weight: .medium, design: .rounded))
                                 .foregroundStyle(UITheme.secondaryText)
                         }
 
                         Spacer()
+
                         KeycapView(settings.hotkeyShortcut.keycapTokens)
                     }
 
@@ -38,6 +40,7 @@ struct SettingsBehaviorCard: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(UITheme.electricBlue)
                         .controlSize(.small)
 
                         Button(L10n.tr("settings.hotkey.reset_default")) {
@@ -50,45 +53,37 @@ struct SettingsBehaviorCard: View {
 
                     if isRecordingHotkey {
                         Text(L10n.tr("settings.hotkey.capture_hint"))
-                            .font(.system(size: 11))
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(UITheme.secondaryText)
                     }
                 }
 
                 Divider()
 
-                Toggle(isOn: $settings.enableVADTrim) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.tr("settings.toggle.vad_trim.title"))
-                        Text(L10n.tr("settings.toggle.vad_trim.subtitle"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(UITheme.secondaryText)
-                    }
-                }
+                behaviorToggle(
+                    title: L10n.tr("settings.toggle.vad_trim.title"),
+                    subtitle: L10n.tr("settings.toggle.vad_trim.subtitle"),
+                    isOn: $settings.enableVADTrim
+                )
 
-                Toggle(isOn: $settings.autoPasteEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.tr("settings.toggle.auto_paste.title"))
-                        Text(L10n.tr("settings.toggle.auto_paste.subtitle"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(UITheme.secondaryText)
-                    }
-                }
+                behaviorToggle(
+                    title: L10n.tr("settings.toggle.auto_paste.title"),
+                    subtitle: L10n.tr("settings.toggle.auto_paste.subtitle"),
+                    isOn: $settings.autoPasteEnabled
+                )
 
-                Toggle(isOn: $settings.enableAutoStopOnSilence) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.tr("settings.toggle.auto_stop_silence.title"))
-                        Text(L10n.tr("settings.toggle.auto_stop_silence.subtitle"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(UITheme.secondaryText)
-                    }
-                }
+                behaviorToggle(
+                    title: L10n.tr("settings.toggle.auto_stop_silence.title"),
+                    subtitle: L10n.tr("settings.toggle.auto_stop_silence.subtitle"),
+                    isOn: $settings.enableAutoStopOnSilence
+                )
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L10n.tr("settings.hud.position.title"))
+                            .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                         Text(L10n.tr("settings.hud.position.subtitle"))
-                            .font(.system(size: 11))
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(UITheme.secondaryText)
                     }
                     Spacer()
@@ -99,7 +94,7 @@ struct SettingsBehaviorCard: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(width: 138)
+                    .frame(width: 150)
                 }
 
                 DisclosureGroup(L10n.tr("settings.advanced.auto_stop")) {
@@ -132,7 +127,9 @@ struct SettingsBehaviorCard: View {
                         }
 
                         Toggle(L10n.tr("settings.advanced.require_speech_before_auto_stop"), isOn: $settings.requireSpeechBeforeAutoStop)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .toggleStyle(.switch)
+                            .tint(UITheme.electricBlue)
 
                         stepperRow(
                             title: L10n.tr("settings.advanced.speech_activate_threshold"),
@@ -144,23 +141,58 @@ struct SettingsBehaviorCard: View {
                         }
 
                         Toggle(L10n.tr("settings.advanced.debug_auto_stop_logs"), isOn: $settings.autoStopDebugLogs)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .toggleStyle(.switch)
+                            .tint(UITheme.electricBlue)
                     }
                     .padding(.top, 6)
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+
+                if !statusMessage.isEmpty {
+                    Text(statusMessage)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(UITheme.secondaryText)
+                }
             }
-            .font(.system(size: 13, weight: .medium))
         }
     }
 
     private func cardTitle(_ title: String, _ icon: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .foregroundStyle(UITheme.successColor)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(UITheme.electricBlue)
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
         }
+    }
+
+    private func behaviorToggle(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(UITheme.secondaryText)
+            }
+            Spacer()
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(UITheme.electricBlue)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.42), lineWidth: 0.8)
+        )
     }
 
     private func stepperRow<Control: View>(
@@ -170,7 +202,7 @@ struct SettingsBehaviorCard: View {
     ) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(UITheme.secondaryText)
             Spacer()
             Text(valueText)
