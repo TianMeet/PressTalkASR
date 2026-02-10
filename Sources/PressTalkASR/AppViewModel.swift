@@ -571,7 +571,7 @@ final class AppViewModel: ObservableObject {
                     // Transcription task canceled after copy; skip auto-paste.
                 } catch {
                     popoverFeedback = .warning(L10n.tr("warning.auto_paste_failed"))
-                    logger.notice("Auto-paste failed after copy: \(error.localizedDescription, privacy: .public)")
+                    logger.notice("Auto-paste failed after copy: \(error.localizedDescription, privacy: .private(mask: .hash))")
                 }
             }
 

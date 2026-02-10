@@ -203,6 +203,7 @@ final class OpenAITranscribeClient {
         static let maxFileSizeBytes = 25 * 1024 * 1024       // 25 MB
         static let requestTimeoutInterval: TimeInterval = 45
         static let resourceTimeoutInterval: TimeInterval = 60
+        static let prewarmHeadTimeoutInterval: TimeInterval = 5
         static let maxRetryAttempts = 3
         static let initialRetryDelayNs: UInt64 = 400_000_000 // 400 ms
         static let prewarmMinInterval: TimeInterval = 7
@@ -212,6 +213,7 @@ final class OpenAITranscribeClient {
         static let fileReadChunkBytes = 256 * 1024
         static let streamBackpressureSleepSeconds: TimeInterval = 0.002
         static let streamStallTimeoutSeconds: TimeInterval = 8
+        static let errorResponseReserveBytes = 4096
     }
 
     private let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
@@ -704,7 +706,7 @@ final class OpenAITranscribeClient {
 
     private func consumeBytes(_ bytes: URLSession.AsyncBytes) async throws -> Data {
         var collected = [UInt8]()
-        collected.reserveCapacity(4096)
+        collected.reserveCapacity(Constants.errorResponseReserveBytes)
         for try await byte in bytes {
             collected.append(byte)
         }
@@ -729,7 +731,7 @@ final class OpenAITranscribeClient {
             defer { prewarmGate.finish() }
             var request = URLRequest(url: endpoint)
             request.httpMethod = "HEAD"
-            request.timeoutInterval = 5
+            request.timeoutInterval = Constants.prewarmHeadTimeoutInterval
             _ = try? await session.data(for: request)
         }
     }

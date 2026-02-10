@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 
 enum AutoPasteError: LocalizedError {
     case accessibilityPermissionMissing
@@ -16,6 +17,12 @@ enum AutoPasteError: LocalizedError {
 }
 
 enum ClipboardManager {
+    private enum Constants {
+        static let keyEventIntervalSeconds: TimeInterval = 0.012
+        static let commandKeyCode: CGKeyCode = CGKeyCode(kVK_Command)
+        static let pasteKeyCode: CGKeyCode = CGKeyCode(kVK_ANSI_V)
+    }
+
     static func copyToPasteboard(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -28,10 +35,10 @@ enum ClipboardManager {
         }
 
         guard let source = CGEventSource(stateID: .combinedSessionState),
-              let commandDown = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: true),
-              let vDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
-              let vUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false),
-              let commandUp = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: false) else {
+              let commandDown = CGEvent(keyboardEventSource: source, virtualKey: Constants.commandKeyCode, keyDown: true),
+              let vDown = CGEvent(keyboardEventSource: source, virtualKey: Constants.pasteKeyCode, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: source, virtualKey: Constants.pasteKeyCode, keyDown: false),
+              let commandUp = CGEvent(keyboardEventSource: source, virtualKey: Constants.commandKeyCode, keyDown: false) else {
             throw AutoPasteError.eventBuildFailed
         }
 
@@ -42,8 +49,11 @@ enum ClipboardManager {
         commandUp.flags = []
 
         commandDown.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: Constants.keyEventIntervalSeconds)
         vDown.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: Constants.keyEventIntervalSeconds)
         vUp.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: Constants.keyEventIntervalSeconds)
         commandUp.post(tap: .cghidEventTap)
     }
 }
