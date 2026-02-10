@@ -130,7 +130,10 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var languageModeRawValue: String {
-        didSet { defaults.set(languageModeRawValue, forKey: Keys.languageModeRawValue) }
+        didSet {
+            defaults.set(languageModeRawValue, forKey: Keys.languageModeRawValue)
+            applyLocalizationPreference()
+        }
     }
 
     @Published var useFullWidthPunctuation: Bool {
@@ -157,6 +160,7 @@ final class AppSettings: ObservableObject {
         languageModeRawValue = defaults.string(forKey: Keys.languageModeRawValue) ?? LanguageMode.auto.rawValue
         useFullWidthPunctuation = defaults.object(forKey: Keys.useFullWidthPunctuation) as? Bool ?? true
         refreshAPIKeyCache()
+        applyLocalizationPreference()
     }
 
     var selectedModel: OpenAIModel {
@@ -300,5 +304,16 @@ final class AppSettings: ObservableObject {
             return fallback
         }
         return number.intValue
+    }
+
+    private func applyLocalizationPreference() {
+        switch languageMode {
+        case .auto:
+            LocalizationStore.shared.setForcedLanguageIdentifier(nil)
+        case .chinese:
+            LocalizationStore.shared.setForcedLanguageIdentifier("zh-Hans")
+        case .english:
+            LocalizationStore.shared.setForcedLanguageIdentifier("en")
+        }
     }
 }

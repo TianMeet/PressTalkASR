@@ -33,6 +33,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func show() {
         guard let window else { return }
         NSApp.activate(ignoringOtherApps: true)
+        window.title = L10n.tr("settings.window.title")
         if !hasBeenShown {
             window.center()
             hasBeenShown = true

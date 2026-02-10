@@ -5,8 +5,10 @@ struct MenuBarPanelView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var settings: AppSettings
     @ObservedObject var costTracker: CostTracker
+    @ObservedObject private var localization = LocalizationStore.shared
 
     var body: some View {
+        let _ = localization.refreshToken
         VStack(spacing: 12) {
             headerCard
             controlCard

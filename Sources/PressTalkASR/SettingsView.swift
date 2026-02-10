@@ -9,6 +9,7 @@ struct SettingsView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var settings: AppSettings
     @ObservedObject var costTracker: CostTracker
+    @ObservedObject private var localization = LocalizationStore.shared
 
     @State private var apiKeyInput = ""
     @State private var statusMessage = ""
@@ -20,6 +21,7 @@ struct SettingsView: View {
     @State private var permissionPollingTask: Task<Void, Never>?
 
     var body: some View {
+        let _ = localization.refreshToken
         ScrollView {
             VStack(spacing: 14) {
                 headerCard

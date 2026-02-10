@@ -3,12 +3,14 @@ import SwiftUI
 struct PopoverRootView: View {
     @StateObject private var viewModel: PopoverViewModel
     @GestureState private var isHoldingPrimary = false
+    @ObservedObject private var localization = LocalizationStore.shared
 
     init(appViewModel: AppViewModel) {
         _viewModel = StateObject(wrappedValue: PopoverViewModel(appViewModel: appViewModel))
     }
 
     var body: some View {
+        let _ = localization.refreshToken
         VStack(spacing: 11) {
             headerSection
             primaryActionSection

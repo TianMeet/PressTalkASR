@@ -6,14 +6,14 @@ enum PopoverMessageFormatter {
         case english
     }
 
-    static func displayLanguage(preferredLanguages: [String] = Locale.preferredLanguages) -> DisplayLanguage {
+    static func displayLanguage(preferredLanguages: [String] = LocalizationStore.shared.preferredLanguages) -> DisplayLanguage {
         guard let first = preferredLanguages.first?.lowercased() else {
             return .english
         }
         return first.hasPrefix("zh") ? .chinese : .english
     }
 
-    static func shortError(_ message: String, preferredLanguages: [String] = Locale.preferredLanguages) -> String {
+    static func shortError(_ message: String, preferredLanguages: [String] = LocalizationStore.shared.preferredLanguages) -> String {
         if message.lowercased().contains("network") || message.contains("网络") {
             return L10n.tr("popover.error.network", preferredLanguages: preferredLanguages)
         }
@@ -23,18 +23,18 @@ enum PopoverMessageFormatter {
         return L10n.tr("popover.error.try_again", preferredLanguages: preferredLanguages)
     }
 
-    static func shortWarning(_ message: String, preferredLanguages: [String] = Locale.preferredLanguages) -> String {
+    static func shortWarning(_ message: String, preferredLanguages: [String] = LocalizationStore.shared.preferredLanguages) -> String {
         if message.contains("自动粘贴") || message.lowercased().contains("paste") {
             return L10n.tr("popover.warning.paste_failed", preferredLanguages: preferredLanguages)
         }
         return L10n.tr("popover.warning.generic", preferredLanguages: preferredLanguages)
     }
 
-    static func warningSubtitle(preferredLanguages: [String] = Locale.preferredLanguages) -> String {
+    static func warningSubtitle(preferredLanguages: [String] = LocalizationStore.shared.preferredLanguages) -> String {
         return L10n.tr("popover.warning.subtitle", preferredLanguages: preferredLanguages)
     }
 
-    static func errorSubtitle(preferredLanguages: [String] = Locale.preferredLanguages) -> String {
+    static func errorSubtitle(preferredLanguages: [String] = LocalizationStore.shared.preferredLanguages) -> String {
         return L10n.tr("popover.error.subtitle", preferredLanguages: preferredLanguages)
     }
 }

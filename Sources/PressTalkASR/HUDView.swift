@@ -15,6 +15,7 @@ struct HUDView: View {
     @ObservedObject var stateMachine: HUDStateMachine
     @ObservedObject var levelMeter: AudioLevelMeter
     @ObservedObject var settings: HUDSettingsStore
+    @ObservedObject private var localization = LocalizationStore.shared
 
     let layout: HUDLayoutConfig
     let onClose: () -> Void
@@ -25,6 +26,7 @@ struct HUDView: View {
     @State private var frozenMode: HUDMode = .hidden
 
     var body: some View {
+        let _ = localization.refreshToken
         card
             .fixedSize(horizontal: true, vertical: true)
         .onHover { hovering in
