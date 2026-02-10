@@ -91,9 +91,9 @@ final class PopoverViewModel: ObservableObject {
         case .success:
             return "Copied to clipboard"
         case .warning:
-            return "已复制，但自动粘贴失败"
+            return PopoverMessageFormatter.warningSubtitle()
         case .error:
-            return "未识别语音或网络异常"
+            return PopoverMessageFormatter.errorSubtitle()
         case .idle:
             return "Press and hold \(hotkeyDisplayText)"
         }
