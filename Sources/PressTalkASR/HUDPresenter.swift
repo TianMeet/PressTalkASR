@@ -68,6 +68,10 @@ final class HUDPresenter {
         }
     }
 
+    func updateHUDAnchor(_ anchor: HUDAnchorPosition) {
+        window.setAnchorPosition(anchor)
+    }
+
     func updateRMS(_ rms: Float) {
         levelMeter.ingestRMS(rms)
     }

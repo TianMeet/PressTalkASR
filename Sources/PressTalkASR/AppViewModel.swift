@@ -228,6 +228,15 @@ final class AppViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        settings.$hudAnchorPositionRawValue
+            .sink { [weak self] rawValue in
+                let anchor = HUDAnchorPosition(rawValue: rawValue) ?? .bottomRight
+                DispatchQueue.main.async { [weak self] in
+                    self?.hudPresenter.updateHUDAnchor(anchor)
+                }
+            }
+            .store(in: &cancellables)
+
         registerConfiguredHotkeyOrFallback()
     }
 

@@ -38,6 +38,7 @@ protocol HUDPresenting: AnyObject {
     var onRetry: (() -> Void)? { get set }
     var onOpenSettings: (() -> Void)? { get set }
     func updateDisplaySettings(autoPasteEnabled: Bool, languageMode: String, modelMode: String)
+    func updateHUDAnchor(_ anchor: HUDAnchorPosition)
     func updateRMS(_ rms: Float)
     func showListening()
     func showTranscribing()

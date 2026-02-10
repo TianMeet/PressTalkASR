@@ -45,6 +45,7 @@ final class FloatingHUDWindow {
     private let hostingView: TransparentHostingView<HUDView>
     private var animationTimer: DispatchSourceTimer?
     private var animationToken: UInt64 = 0
+    private var anchorPosition: HUDAnchorPosition = .bottomRight
 
     deinit {
         animationTimer?.cancel()
@@ -89,6 +90,18 @@ final class FloatingHUDWindow {
 
     func setRootView(_ rootView: HUDView) {
         hostingView.rootView = rootView
+    }
+
+    func setAnchorPosition(_ anchor: HUDAnchorPosition) {
+        guard anchorPosition != anchor else { return }
+        anchorPosition = anchor
+
+        let targetFrame = anchorFrame(width: panel.frame.width, height: panel.frame.height)
+        if panel.isVisible {
+            animateFrameTransition(from: panel.frame, to: targetFrame, duration: Animation.resizeDuration)
+        } else {
+            panel.setFrame(targetFrame, display: true)
+        }
     }
 
     func show(height: CGFloat) {
@@ -165,8 +178,24 @@ final class FloatingHUDWindow {
         }
 
         let visible = screen.visibleFrame
-        let x = visible.maxX - width - layout.edgePadding
-        let y = visible.minY + layout.edgePadding
+        let x: CGFloat
+        let y: CGFloat
+
+        switch anchorPosition {
+        case .bottomRight:
+            x = visible.maxX - width - layout.edgePadding
+            y = visible.minY + layout.edgePadding
+        case .bottomLeft:
+            x = visible.minX + layout.edgePadding
+            y = visible.minY + layout.edgePadding
+        case .topRight:
+            x = visible.maxX - width - layout.edgePadding
+            y = visible.maxY - height - layout.edgePadding
+        case .topLeft:
+            x = visible.minX + layout.edgePadding
+            y = visible.maxY - height - layout.edgePadding
+        }
+
         return NSRect(x: x, y: y, width: width, height: height)
     }
 

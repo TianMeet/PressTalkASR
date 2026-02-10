@@ -84,6 +84,24 @@ struct SettingsBehaviorCard: View {
                     }
                 }
 
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("HUD Position")
+                        Text("转写浮窗显示位置")
+                            .font(.system(size: 11))
+                            .foregroundStyle(UITheme.secondaryText)
+                    }
+                    Spacer()
+                    Picker("HUD Position", selection: hudAnchorSelection) {
+                        ForEach(HUDAnchorPosition.allCases) { anchor in
+                            Text(anchor.displayName).tag(anchor.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 138)
+                }
+
                 DisclosureGroup("Advanced (Auto Stop)") {
                     VStack(alignment: .leading, spacing: 8) {
                         stepperRow(
@@ -159,5 +177,17 @@ struct SettingsBehaviorCard: View {
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
             control()
         }
+    }
+
+    private var hudAnchorSelection: Binding<String> {
+        Binding(
+            get: { settings.hudAnchorPositionRawValue },
+            set: { rawValue in
+                guard settings.hudAnchorPositionRawValue != rawValue else { return }
+                DispatchQueue.main.async {
+                    settings.hudAnchorPositionRawValue = rawValue
+                }
+            }
+        )
     }
 }

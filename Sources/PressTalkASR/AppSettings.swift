@@ -33,6 +33,7 @@ final class AppSettings: ObservableObject {
         static let autoPasteEnabled = "autoPasteEnabled"
         static let enableVADTrim = "enableVADTrim"
         static let enableAutoStopOnSilence = "enableAutoStopOnSilence"
+        static let hudAnchorPositionRawValue = "hudAnchorPositionRawValue"
         static let hotkeyKeyCode = "hotkeyKeyCode"
         static let hotkeyModifiers = "hotkeyModifiers"
         static let silenceThresholdDB = "silenceThresholdDB"
@@ -65,6 +66,10 @@ final class AppSettings: ObservableObject {
 
     @Published var enableAutoStopOnSilence: Bool {
         didSet { defaults.set(enableAutoStopOnSilence, forKey: Keys.enableAutoStopOnSilence) }
+    }
+
+    @Published var hudAnchorPositionRawValue: String {
+        didSet { defaults.set(hudAnchorPositionRawValue, forKey: Keys.hudAnchorPositionRawValue) }
     }
 
     @Published var hotkeyKeyCode: Int {
@@ -127,6 +132,7 @@ final class AppSettings: ObservableObject {
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? false
         enableVADTrim = defaults.object(forKey: Keys.enableVADTrim) as? Bool ?? true
         enableAutoStopOnSilence = defaults.object(forKey: Keys.enableAutoStopOnSilence) as? Bool ?? true
+        hudAnchorPositionRawValue = defaults.string(forKey: Keys.hudAnchorPositionRawValue) ?? HUDAnchorPosition.bottomRight.rawValue
         hotkeyKeyCode = AppSettings.intValue(defaults: defaults, key: Keys.hotkeyKeyCode, fallback: Int(HotkeyShortcut.defaultPushToTalk.keyCode))
         hotkeyModifiers = AppSettings.intValue(defaults: defaults, key: Keys.hotkeyModifiers, fallback: Int(HotkeyShortcut.defaultPushToTalk.carbonModifiers))
         silenceThresholdDB = AppSettings.floatValue(defaults: defaults, key: Keys.silenceThresholdDB, fallback: -45)
@@ -166,6 +172,11 @@ final class AppSettings: ObservableObject {
     var languageMode: LanguageMode {
         get { LanguageMode(rawValue: languageModeRawValue) ?? .auto }
         set { languageModeRawValue = newValue.rawValue }
+    }
+
+    var hudAnchorPosition: HUDAnchorPosition {
+        get { HUDAnchorPosition(rawValue: hudAnchorPositionRawValue) ?? .bottomRight }
+        set { hudAnchorPositionRawValue = newValue.rawValue }
     }
 
     var preferredLanguageCode: String? {
