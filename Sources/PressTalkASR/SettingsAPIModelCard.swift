@@ -77,13 +77,13 @@ struct SettingsAPIModelCard: View {
                     .buttonStyle(.bordered)
                 }
 
-                Picker("Model", selection: $settings.selectedModelRawValue) {
+                Picker("Model", selection: deferredModelBinding) {
                     Text("mini").tag(OpenAIModel.gpt4oMiniTranscribe.rawValue)
                     Text("accurate").tag(OpenAIModel.gpt4oTranscribe.rawValue)
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Language", selection: $settings.languageModeRawValue) {
+                Picker("Language", selection: deferredLanguageBinding) {
                     ForEach(AppSettings.LanguageMode.allCases) { mode in
                         Text(mode.displayName).tag(mode.rawValue)
                     }
@@ -174,6 +174,30 @@ struct SettingsAPIModelCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(selected ? UITheme.successColor.opacity(0.35) : Color.black.opacity(0.07), lineWidth: 0.8)
+        )
+    }
+
+    private var deferredModelBinding: Binding<String> {
+        Binding(
+            get: { settings.selectedModelRawValue },
+            set: { newValue in
+                guard settings.selectedModelRawValue != newValue else { return }
+                DispatchQueue.main.async {
+                    settings.selectedModelRawValue = newValue
+                }
+            }
+        )
+    }
+
+    private var deferredLanguageBinding: Binding<String> {
+        Binding(
+            get: { settings.languageModeRawValue },
+            set: { newValue in
+                guard settings.languageModeRawValue != newValue else { return }
+                DispatchQueue.main.async {
+                    settings.languageModeRawValue = newValue
+                }
+            }
         )
     }
 }
