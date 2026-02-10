@@ -340,12 +340,12 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        transition(to: .idle)
         recordingSessionCoordinator.finishStop()
 
         let recordedSeconds = audioRecorder.lastDuration
         if recordedSeconds < Constants.minimumRecordingSeconds {
             try? FileManager.default.removeItem(at: sourceURL)
+            transition(to: .idle)
             showError(WorkflowError.recordingTooShort.localizedDescription)
             return
         }
