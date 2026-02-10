@@ -124,6 +124,28 @@
 "error.openai.temp_server_issue" = "Temporary server issue";
 "error.openai.upload_stream_write_failed_format" = "Failed writing upload stream: %@";
 "error.openai.upload_stream_failed_format" = "Upload stream write failed: %@";
+"error.openai.upload_stream_closed" = "Upload stream is closed.";
+"error.openai.upload_stream_stalled_timeout" = "Timed out waiting for upload stream write.";
+"error.openai.upload_stream_ended_early" = "Upload stream ended unexpectedly.";
+"error.openai.upload_stream_cancelled" = "Upload was cancelled.";
+"error.openai.upload_stream_unknown_write_error" = "Unknown upload stream write error";
+
+"error.recorder.permission_denied" = "Microphone permission is not granted.";
+"error.recorder.already_recording" = "Recorder is already running.";
+"error.recorder.init_failed" = "Failed to initialize recorder.";
+"error.recorder.start_failed" = "Failed to start recording.";
+"error.recorder.not_recording" = "There is no active recording session.";
+"error.recorder.no_supported_format" = "No supported recording format is available on this Mac.";
+
+"error.hotkey.invalid_shortcut" = "Invalid shortcut: include at least one modifier.";
+"error.hotkey.install_handler_failed_format" = "Failed to install hotkey handler (status: %d).";
+"error.hotkey.register_failed_format" = "Failed to register hotkey (status: %d).";
+
+"error.transcription.audio_file_not_ready" = "Audio file is not ready yet. Please try again in a moment.";
+
+"error.api_key.empty" = "Please enter an API key.";
+"error.api_key.invalid_prefix" = "Key format looks invalid: it should start with sk-.";
+"error.api_key.too_short" = "Key is too short. Please verify it was pasted completely.";
 
 "error.workflow.missing_api_key" = "API key not found. Please set it in Settings.";
 "error.workflow.recording_too_short" = "Recording is too short. Hold for at least 0.2s.";

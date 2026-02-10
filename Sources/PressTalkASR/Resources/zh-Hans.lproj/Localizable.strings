@@ -124,6 +124,28 @@
 "error.openai.temp_server_issue" = "服务暂时不可用";
 "error.openai.upload_stream_write_failed_format" = "写入上传流失败：%@";
 "error.openai.upload_stream_failed_format" = "上传流写入失败：%@";
+"error.openai.upload_stream_closed" = "上传流已关闭。";
+"error.openai.upload_stream_stalled_timeout" = "上传写入等待超时。";
+"error.openai.upload_stream_ended_early" = "上传流提前结束。";
+"error.openai.upload_stream_cancelled" = "上传被取消。";
+"error.openai.upload_stream_unknown_write_error" = "未知上传流写入错误";
+
+"error.recorder.permission_denied" = "麦克风权限未授予。";
+"error.recorder.already_recording" = "录音器已在运行中。";
+"error.recorder.init_failed" = "无法初始化录音器。";
+"error.recorder.start_failed" = "无法开始录音。";
+"error.recorder.not_recording" = "当前没有进行中的录音会话。";
+"error.recorder.no_supported_format" = "当前 Mac 没有可用的录音格式。";
+
+"error.hotkey.invalid_shortcut" = "快捷键无效：请至少包含一个修饰键。";
+"error.hotkey.install_handler_failed_format" = "热键处理程序安装失败（状态码：%d）。";
+"error.hotkey.register_failed_format" = "热键注册失败（状态码：%d）。";
+
+"error.transcription.audio_file_not_ready" = "音频文件尚未准备好，请稍后再试。";
+
+"error.api_key.empty" = "请输入 API Key。";
+"error.api_key.invalid_prefix" = "Key 格式看起来不正确：应以 sk- 开头。";
+"error.api_key.too_short" = "Key 长度过短，请检查是否粘贴完整。";
 
 "error.workflow.missing_api_key" = "未找到 API Key，请在设置中输入并保存。";
 "error.workflow.recording_too_short" = "录音太短，请按住至少 0.2 秒再松开。";

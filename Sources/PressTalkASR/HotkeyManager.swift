@@ -9,11 +9,11 @@ enum HotkeyError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidShortcut:
-            return "快捷键无效：请至少包含一个修饰键。"
+            return L10n.tr("error.hotkey.invalid_shortcut")
         case .installHandlerFailed(let status):
-            return "热键处理程序安装失败（状态码：\(status)）。"
+            return L10n.tr("error.hotkey.install_handler_failed_format", status)
         case .registerHotkeyFailed(let status):
-            return "热键注册失败（状态码：\(status)）。"
+            return L10n.tr("error.hotkey.register_failed_format", status)
         }
     }
 }

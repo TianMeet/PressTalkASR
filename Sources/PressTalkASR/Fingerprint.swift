@@ -19,9 +19,9 @@ enum APIKeyFingerprint {
 
     static func validationError(for key: String) -> String? {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "请输入 API Key。" }
-        guard trimmed.hasPrefix("sk-") else { return "Key 格式看起来不正确：应以 sk- 开头。" }
-        guard trimmed.count >= 20 else { return "Key 长度过短，请检查是否粘贴完整。" }
+        guard !trimmed.isEmpty else { return L10n.tr("error.api_key.empty") }
+        guard trimmed.hasPrefix("sk-") else { return L10n.tr("error.api_key.invalid_prefix") }
+        guard trimmed.count >= 20 else { return L10n.tr("error.api_key.too_short") }
         return nil
     }
 }

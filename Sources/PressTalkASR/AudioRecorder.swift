@@ -20,17 +20,17 @@ final class AudioRecorder {
         var errorDescription: String? {
             switch self {
             case .permissionDenied:
-                return "麦克风权限未授予。"
+                return L10n.tr("error.recorder.permission_denied")
             case .alreadyRecording:
-                return "录音器已在运行中。"
+                return L10n.tr("error.recorder.already_recording")
             case .recorderInitFailed:
-                return "无法初始化录音器。"
+                return L10n.tr("error.recorder.init_failed")
             case .recordingStartFailed:
-                return "无法开始录音。"
+                return L10n.tr("error.recorder.start_failed")
             case .notRecording:
-                return "当前没有进行中的录音会话。"
+                return L10n.tr("error.recorder.not_recording")
             case .noSupportedRecordingFormat:
-                return "当前 Mac 没有可用的录音格式。"
+                return L10n.tr("error.recorder.no_supported_format")
             }
         }
     }

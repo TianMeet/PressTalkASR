@@ -6,7 +6,7 @@ enum TranscriptionExecutionError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .audioFileNotReady:
-            return "音频文件尚未准备好，请稍后再试。"
+            return L10n.tr("error.transcription.audio_file_not_ready")
         }
     }
 }

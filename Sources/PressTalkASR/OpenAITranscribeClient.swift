@@ -631,11 +631,11 @@ final class OpenAITranscribeClient {
                         )
                     }
                     if stream.streamStatus == .closed || stream.streamStatus == .error {
-                        throw OpenAITranscribeError.network("上传流已关闭。")
+                        throw OpenAITranscribeError.network(L10n.tr("error.openai.upload_stream_closed"))
                     }
                     if stalledAt == nil { stalledAt = Date() }
                     if let stalledAt, Date().timeIntervalSince(stalledAt) > Constants.streamStallTimeoutSeconds {
-                        throw OpenAITranscribeError.network("上传写入等待超时。")
+                        throw OpenAITranscribeError.network(L10n.tr("error.openai.upload_stream_stalled_timeout"))
                     }
                     Thread.sleep(forTimeInterval: Constants.streamBackpressureSleepSeconds)
                     continue
@@ -648,19 +648,19 @@ final class OpenAITranscribeClient {
                     continue
                 }
                 if count < 0 {
-                    let message = stream.streamError?.localizedDescription ?? "Unknown stream write error"
+                    let message = stream.streamError?.localizedDescription ?? L10n.tr("error.openai.upload_stream_unknown_write_error")
                     throw OpenAITranscribeError.network(
                         L10n.tr("error.openai.upload_stream_write_failed_format", message)
                     )
                 }
 
                 if stream.streamStatus == .atEnd || stream.streamStatus == .closed || stream.streamStatus == .error {
-                    throw OpenAITranscribeError.network("上传流提前结束。")
+                    throw OpenAITranscribeError.network(L10n.tr("error.openai.upload_stream_ended_early"))
                 }
 
                 if stalledAt == nil { stalledAt = Date() }
                 if let stalledAt, Date().timeIntervalSince(stalledAt) > Constants.streamStallTimeoutSeconds {
-                    throw OpenAITranscribeError.network("上传写入等待超时。")
+                    throw OpenAITranscribeError.network(L10n.tr("error.openai.upload_stream_stalled_timeout"))
                 }
                 Thread.sleep(forTimeInterval: Constants.streamBackpressureSleepSeconds)
             }
@@ -671,7 +671,7 @@ final class OpenAITranscribeClient {
         do {
             try await writerHandle.waitForCompletion()
         } catch is CancellationError {
-            throw OpenAITranscribeError.network("上传被取消。")
+            throw OpenAITranscribeError.network(L10n.tr("error.openai.upload_stream_cancelled"))
         } catch let error as OpenAITranscribeError {
             throw error
         } catch {
