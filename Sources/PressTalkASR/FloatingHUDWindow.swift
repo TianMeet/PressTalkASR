@@ -115,8 +115,16 @@ final class FloatingHUDWindow {
             return
         }
 
+        let resolvedShowOffsetX: CGFloat
+        switch anchorPosition {
+        case .bottomLeft, .topLeft:
+            resolvedShowOffsetX = -Animation.showOffsetX
+        case .bottomRight, .topRight:
+            resolvedShowOffsetX = Animation.showOffsetX
+        }
+
         let startFrame = NSRect(
-            x: finalFrame.origin.x + Animation.showOffsetX,
+            x: finalFrame.origin.x + resolvedShowOffsetX,
             y: finalFrame.origin.y + Animation.showOffsetY,
             width: finalFrame.width,
             height: finalFrame.height
