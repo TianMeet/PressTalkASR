@@ -2,7 +2,10 @@ import SwiftUI
 import AppKit
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    static let didShowNotification = Notification.Name("SettingsWindowController.didShow")
+    static let didCloseNotification = Notification.Name("SettingsWindowController.didClose")
+
     private var hasBeenShown = false
 
     init(viewModel: AppViewModel, settings: AppSettings, costTracker: CostTracker) {
@@ -19,6 +22,7 @@ final class SettingsWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
 
         super.init(window: window)
+        window.delegate = self
     }
 
     @available(*, unavailable)
@@ -34,5 +38,10 @@ final class SettingsWindowController: NSWindowController {
             hasBeenShown = true
         }
         window.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: Self.didShowNotification, object: window)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NotificationCenter.default.post(name: Self.didCloseNotification, object: window)
     }
 }

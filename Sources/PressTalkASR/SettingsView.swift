@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var hasMicPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     @State private var isRecordingHotkey = false
     @State private var hotkeyMonitor: Any?
-    private let permissionRefreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+    @State private var permissionPollingTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -34,18 +34,24 @@ struct SettingsView: View {
         .onAppear {
             syncAPIKeyInputFromStorage()
             refreshPermissionSnapshot()
+            startPermissionPolling()
         }
         .onChange(of: settings.apiKeySourceState) { _ in
             syncAPIKeyInputFromStorage()
         }
-        .onReceive(permissionRefreshTimer) { _ in
-            refreshPermissionSnapshot()
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissionSnapshot()
         }
+        .onReceive(NotificationCenter.default.publisher(for: SettingsWindowController.didShowNotification)) { _ in
+            refreshPermissionSnapshot()
+            startPermissionPolling()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: SettingsWindowController.didCloseNotification)) { _ in
+            stopPermissionPolling()
+        }
         .onDisappear {
             stopHotkeyCapture()
+            stopPermissionPolling()
         }
         .background(
             LinearGradient(
@@ -222,6 +228,22 @@ struct SettingsView: View {
     private func refreshPermissionSnapshot() {
         hasMicPermission = PermissionHelper.microphoneStatus() == .granted
         hasAXPermission = PermissionHelper.accessibilityStatus() == .granted
+    }
+
+    private func startPermissionPolling() {
+        guard permissionPollingTask == nil else { return }
+        permissionPollingTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { break }
+                refreshPermissionSnapshot()
+            }
+        }
+    }
+
+    private func stopPermissionPolling() {
+        permissionPollingTask?.cancel()
+        permissionPollingTask = nil
     }
 
     private func startHotkeyCapture() {
