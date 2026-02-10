@@ -217,11 +217,13 @@ final class AppViewModel: ObservableObject {
         settings.$autoPasteEnabled
             .combineLatest(settings.$selectedModelRawValue, settings.$languageModeRawValue)
             .sink { [weak self] autoPaste, model, language in
-                self?.hudPresenter.updateDisplaySettings(
-                    autoPasteEnabled: autoPaste,
-                    languageMode: language,
-                    modelMode: model
-                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.hudPresenter.updateDisplaySettings(
+                        autoPasteEnabled: autoPaste,
+                        languageMode: language,
+                        modelMode: model
+                    )
+                }
             }
             .store(in: &cancellables)
 

@@ -57,9 +57,15 @@ final class HUDPresenter {
     }
 
     func updateDisplaySettings(autoPasteEnabled: Bool, languageMode: String, modelMode: String) {
-        settings.autoPasteEnabled = autoPasteEnabled
-        settings.languageMode = languageMode
-        settings.modelMode = modelMode
+        if settings.autoPasteEnabled != autoPasteEnabled {
+            settings.autoPasteEnabled = autoPasteEnabled
+        }
+        if settings.languageMode != languageMode {
+            settings.languageMode = languageMode
+        }
+        if settings.modelMode != modelMode {
+            settings.modelMode = modelMode
+        }
     }
 
     func updateRMS(_ rms: Float) {
