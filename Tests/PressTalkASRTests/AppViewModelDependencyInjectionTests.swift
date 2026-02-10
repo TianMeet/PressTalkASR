@@ -147,6 +147,43 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         transcribeClient.resume(with: "ok")
     }
 
+    func testShortRecordingIsSilentlyDiscardedWithoutErrorHUD() async {
+        let settings = AppSettings()
+        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+
+        let hotkeyManager = MockHotkeyManager()
+        let audioRecorder = MockAudioRecorder()
+        let hudPresenter = MockHUDPresenter()
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appvm-short-recording-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        let audioData = Data(repeating: 1, count: 512)
+        FileManager.default.createFile(atPath: sourceURL.path, contents: audioData)
+        audioRecorder.recordingURL = sourceURL
+        audioRecorder.lastDuration = 0.05
+
+        let viewModel = AppViewModel(
+            settings: settings,
+            costTracker: CostTracker(),
+            hotkeyManager: hotkeyManager,
+            audioRecorder: audioRecorder,
+            vadTrimmer: MockVADTrimmer(),
+            transcribeClient: MockTranscribeClient(),
+            hudPresenter: hudPresenter,
+            clipboardService: MockClipboardService()
+        )
+
+        await viewModel.beginPushToTalk()
+        await viewModel.endPushToTalk()
+        await Task.yield()
+
+        XCTAssertEqual(viewModel.sessionPhase, .idle)
+        XCTAssertEqual(viewModel.popoverFeedback, .none)
+        XCTAssertEqual(viewModel.lastMessage, "")
+        XCTAssertEqual(hudPresenter.showErrorReasons.count, 0)
+        XCTAssertEqual(hudPresenter.dismissCallCount, 1)
+    }
+
     private func makeViewModel(
         settings: AppSettings,
         hotkeyManager: MockHotkeyManager
@@ -261,6 +298,8 @@ private final class MockHUDPresenter: HUDPresenting {
     var onOpenSettings: (() -> Void)?
     private(set) var showTranscribingCallCount = 0
     private(set) var transcribingPreviews: [String] = []
+    private(set) var showErrorReasons: [String] = []
+    private(set) var dismissCallCount = 0
 
     func updateDisplaySettings(autoPasteEnabled: Bool, languageMode: String, modelMode: String) {}
     func updateRMS(_ rms: Float) {}
@@ -272,7 +311,12 @@ private final class MockHUDPresenter: HUDPresenting {
         transcribingPreviews.append(text)
     }
     func showSuccess(_ text: String) {}
-    func showError(_ reason: String) {}
+    func showError(_ reason: String) {
+        showErrorReasons.append(reason)
+    }
+    func dismiss() {
+        dismissCallCount += 1
+    }
     func runDemoSequence() {}
 }
 

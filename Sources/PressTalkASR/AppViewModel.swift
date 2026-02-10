@@ -354,7 +354,8 @@ final class AppViewModel: ObservableObject {
         if recordedSeconds < Constants.minimumRecordingSeconds {
             try? FileManager.default.removeItem(at: sourceURL)
             transition(to: .idle)
-            showError(WorkflowError.recordingTooShort.localizedDescription)
+            lastMessage = ""
+            hudPresenter.dismiss()
             return
         }
 

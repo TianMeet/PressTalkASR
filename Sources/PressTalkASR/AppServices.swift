@@ -44,6 +44,7 @@ protocol HUDPresenting: AnyObject {
     func updateTranscribingPreview(_ text: String)
     func showSuccess(_ text: String)
     func showError(_ reason: String)
+    func dismiss()
     func runDemoSequence()
 }
 
