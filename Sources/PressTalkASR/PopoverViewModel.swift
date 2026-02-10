@@ -225,10 +225,9 @@ final class PopoverViewModel: ObservableObject {
     }
 
     private func bindAppState() {
-        appViewModel.$isRecording
-            .combineLatest(appViewModel.$isTranscribing)
-            .sink { [weak self] isRecording, isTranscribing in
-                self?.handleBaseState(isRecording: isRecording, isTranscribing: isTranscribing)
+        appViewModel.$sessionPhase
+            .sink { [weak self] phase in
+                self?.handleBaseState(phase: phase)
             }
             .store(in: &cancellables)
 
@@ -247,25 +246,22 @@ final class PopoverViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func handleBaseState(isRecording: Bool, isTranscribing: Bool) {
-        if isRecording {
+    private func handleBaseState(phase: SessionPhase) {
+        switch phase {
+        case .listening:
             transientLock = false
             showAccessibilityHint = false
             setState(.recording)
             startRecordingTimer()
-            return
-        }
-
-        stopRecordingTimer()
-
-        if isTranscribing {
+        case .transcribing:
+            stopRecordingTimer()
             transientLock = false
             setState(.transcribing)
-            return
-        }
-
-        if !transientLock {
-            setState(.idle)
+        case .idle:
+            stopRecordingTimer()
+            if !transientLock {
+                setState(.idle)
+            }
         }
     }
 
@@ -321,7 +317,7 @@ final class PopoverViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             self.transientLock = false
-            if !self.appViewModel.isRecording && !self.appViewModel.isTranscribing {
+            if self.appViewModel.sessionPhase == .idle {
                 self.setState(.idle)
             }
         }

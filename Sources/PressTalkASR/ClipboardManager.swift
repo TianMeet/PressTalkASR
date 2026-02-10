@@ -23,7 +23,7 @@ enum ClipboardManager {
     }
 
     static func autoPaste() throws {
-        guard AXIsProcessTrusted() else {
+        guard PermissionHelper.accessibilityStatus() == .granted else {
             throw AutoPasteError.accessibilityPermissionMissing
         }
 
@@ -44,19 +44,5 @@ enum ClipboardManager {
         vDown.post(tap: .cghidEventTap)
         vUp.post(tap: .cghidEventTap)
         commandUp.post(tap: .cghidEventTap)
-    }
-
-    static func openAccessibilitySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
-
-    static func openMicrophoneSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
     }
 }

@@ -351,14 +351,14 @@ struct SettingsView: View {
                     title: "Microphone",
                     granted: hasMicPermission,
                     actionTitle: "Open Microphone Settings",
-                    action: { ClipboardManager.openMicrophoneSettings() }
+                    action: { PermissionHelper.openMicrophoneSettings() }
                 )
 
                 permissionRow(
                     title: "Accessibility",
                     granted: hasAXPermission,
                     actionTitle: "Open Accessibility Settings",
-                    action: { ClipboardManager.openAccessibilitySettings() }
+                    action: { PermissionHelper.openAccessibilitySettings() }
                 )
             }
         }

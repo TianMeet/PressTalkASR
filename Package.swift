@@ -22,6 +22,11 @@ let package = Package(
                     "-Xlinker", "Sources/PressTalkASR/Info.plist"
                 ], .when(platforms: [.macOS]))
             ]
+        ),
+        .testTarget(
+            name: "PressTalkASRTests",
+            dependencies: ["PressTalkASR"],
+            path: "Tests/PressTalkASRTests"
         )
     ]
 )

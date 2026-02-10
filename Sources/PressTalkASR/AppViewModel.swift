@@ -79,6 +79,17 @@ final class AppViewModel: ObservableObject {
         case listening
         case transcribing
 
+        init(phase: SessionPhase) {
+            switch phase {
+            case .idle:
+                self = .idle
+            case .listening:
+                self = .listening
+            case .transcribing:
+                self = .transcribing
+            }
+        }
+
         var title: String {
             switch self {
             case .idle: return "Idle"
@@ -138,6 +149,7 @@ final class AppViewModel: ObservableObject {
         static let debugLogMinInterval: TimeInterval = 0.15
     }
 
+    @Published private(set) var sessionPhase: SessionPhase = .idle
     @Published private(set) var isRecording = false
     @Published private(set) var isTranscribing = false
     @Published private(set) var lastMessage = ""
@@ -163,15 +175,11 @@ final class AppViewModel: ObservableObject {
     private var lastAutoStopLogTime = Date.distantPast
 
     var menuBarIconName: String {
-        if isRecording { return "mic.fill" }
-        if isTranscribing { return "waveform.badge.magnifyingglass" }
-        return "mic"
+        sessionPhase.menuBarIconName
     }
 
     var sessionStatus: SessionStatus {
-        if isRecording { return .listening }
-        if isTranscribing { return .transcribing }
-        return .idle
+        SessionStatus(phase: sessionPhase)
     }
 
     init() {
@@ -259,6 +267,12 @@ final class AppViewModel: ObservableObject {
         await stopAndTranscribe(trigger: .manual)
     }
 
+    private func transition(to phase: SessionPhase) {
+        sessionPhase = phase
+        isRecording = phase.isRecording
+        isTranscribing = phase.isTranscribing
+    }
+
     private func startListening() async {
         guard !isTranscribing else { return }
         popoverFeedback = .none
@@ -278,7 +292,7 @@ final class AppViewModel: ObservableObject {
             hasAutoStopFiredForSession = false
 
             _ = try audioRecorder.startRecording()
-            isRecording = true
+            transition(to: .listening)
             lastMessage = "Listening…"
             hudPresenter.showListening()
 
@@ -314,7 +328,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        isRecording = false
+        transition(to: .idle)
         isStoppingRecording = false
         recordingStartedAt = nil
 
@@ -325,7 +339,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        isTranscribing = true
+        transition(to: .transcribing)
         lastMessage = "Transcribing…"
         hudPresenter.showTranscribing()
         // 停止录音后继续保温一小段时间，覆盖上传与首字阶段。
@@ -468,7 +482,7 @@ final class AppViewModel: ObservableObject {
             }
 
             costTracker.add(seconds: recordedSeconds)
-            isTranscribing = false
+            transition(to: .idle)
         } catch {
             logTranscriptionTiming(
                 startedAt: transcriptionStartedAt,
@@ -478,7 +492,7 @@ final class AppViewModel: ObservableObject {
                 error: error
             )
             showError(error.localizedDescription)
-            isTranscribing = false
+            transition(to: .idle)
         }
     }
 
