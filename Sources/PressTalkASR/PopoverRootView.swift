@@ -24,6 +24,7 @@ struct PopoverRootView: View {
         }
         .onDisappear {
             viewModel.handlePopoverDisappear()
+            viewModel.primaryPressEnded()
         }
     }
 
@@ -77,16 +78,16 @@ struct PopoverRootView: View {
                         .updating($isHoldingPrimary) { _, state, _ in
                             state = true
                         }
-                        .onEnded { _ in
-                            Task { @MainActor in
-                                viewModel.primaryPressEnded()
-                            }
-                        }
                 )
                 .onChange(of: isHoldingPrimary) { isHolding in
-                    guard isHolding else { return }
                     Task { @MainActor in
-                        viewModel.primaryPressBegan()
+                        if isHolding {
+                            viewModel.primaryPressBegan()
+                        } else {
+                            // Gesture can be canceled by the system; always mirror
+                            // both edges to avoid leaving recording in a stuck state.
+                            viewModel.primaryPressEnded()
+                        }
                     }
                 }
 
