@@ -124,11 +124,14 @@ final class AppViewModel: ObservableObject {
     private enum StopTrigger {
         case manual
         case autoSilence
+        case maxDuration
     }
 
     private enum Constants {
         /// 录音最短有效时长
         static let minimumRecordingSeconds: TimeInterval = 0.2
+        /// 最大录音时长保护
+        static let maximumRecordingSeconds: TimeInterval = 120
         /// 转写预览增量刷新节流间隔
         static let previewThrottleSeconds: TimeInterval = 0.08   // 80 ms
         /// 静音自动结束触发前延迟
@@ -158,8 +161,10 @@ final class AppViewModel: ObservableObject {
     private var transcribeTask: Task<Void, Never>?
     private var activeTranscriptionToken: UUID?
     private var pendingAutoStopTask: Task<Void, Never>?
+    private var pendingMaxDurationTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private var lastAutoStopLogTime = Date.distantPast
+    private let maxRecordingDurationSeconds: TimeInterval
 
     var menuBarIconName: String {
         sessionPhase.menuBarIconName
@@ -178,7 +183,8 @@ final class AppViewModel: ObservableObject {
         transcribeClient: any TranscriptionServicing = OpenAITranscribeClient(),
         hudPresenter: any HUDPresenting = HUDPresenter(),
         clipboardService: any ClipboardManaging = SystemClipboardService(),
-        recordingSessionCoordinator: RecordingSessionCoordinator = RecordingSessionCoordinator()
+        recordingSessionCoordinator: RecordingSessionCoordinator = RecordingSessionCoordinator(),
+        maxRecordingDurationSeconds: TimeInterval = Constants.maximumRecordingSeconds
     ) {
         self.settings = settings
         self.costTracker = costTracker
@@ -188,6 +194,7 @@ final class AppViewModel: ObservableObject {
         self.hudPresenter = hudPresenter
         self.clipboardService = clipboardService
         self.recordingSessionCoordinator = recordingSessionCoordinator
+        self.maxRecordingDurationSeconds = maxRecordingDurationSeconds
         self.transcriptionCoordinator = TranscriptionCoordinator(
             transcribeClient: transcribeClient,
             vadTrimmer: vadTrimmer
@@ -299,6 +306,8 @@ final class AppViewModel: ObservableObject {
             return .manual
         case .autoSilence:
             return .autoSilence
+        case .maxDuration:
+            return .manual
         }
     }
 
@@ -321,12 +330,15 @@ final class AppViewModel: ObservableObject {
         do {
             pendingAutoStopTask?.cancel()
             pendingAutoStopTask = nil
+            pendingMaxDurationTask?.cancel()
+            pendingMaxDurationTask = nil
             recordingSessionCoordinator.beginSession(configuration: settings.autoStopConfiguration)
 
             _ = try audioRecorder.startRecording()
             transition(to: .listening)
             lastMessage = "Listening…"
             hudPresenter.showListening()
+            scheduleMaxRecordingGuard()
 
             // 录音开始即进入短周期连接保温，降低松开后冷连接概率。
             transcribeClient.keepWarmForInteractionWindow()
@@ -343,6 +355,8 @@ final class AppViewModel: ObservableObject {
 
         pendingAutoStopTask?.cancel()
         pendingAutoStopTask = nil
+        pendingMaxDurationTask?.cancel()
+        pendingMaxDurationTask = nil
 
         popoverFeedback = .none
 
@@ -408,6 +422,16 @@ final class AppViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: Constants.autoStopDebounceNs)
             guard !Task.isCancelled else { return }
             await self?.stopAndTranscribe(trigger: .autoSilence)
+        }
+    }
+
+    private func scheduleMaxRecordingGuard() {
+        pendingMaxDurationTask?.cancel()
+        pendingMaxDurationTask = Task { [weak self] in
+            let duration = max(0.01, self?.maxRecordingDurationSeconds ?? Constants.maximumRecordingSeconds)
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.stopAndTranscribe(trigger: .maxDuration)
         }
     }
 

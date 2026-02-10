@@ -120,6 +120,51 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         transcribeClient.resume(with: "ok")
     }
 
+    func testMaxRecordingDurationAutomaticallyStopsAndTranscribes() async {
+        let settings = AppSettings()
+        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+
+        let hotkeyManager = MockHotkeyManager()
+        let audioRecorder = MockAudioRecorder()
+        let transcribeClient = BlockingTranscribeClient()
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appvm-max-duration-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        let audioData = Data(repeating: 1, count: 2048)
+        FileManager.default.createFile(atPath: sourceURL.path, contents: audioData)
+        audioRecorder.recordingURL = sourceURL
+        audioRecorder.lastDuration = 0.6
+
+        let viewModel = AppViewModel(
+            settings: settings,
+            costTracker: CostTracker(),
+            hotkeyManager: hotkeyManager,
+            audioRecorder: audioRecorder,
+            vadTrimmer: MockVADTrimmer(),
+            transcribeClient: transcribeClient,
+            hudPresenter: MockHUDPresenter(),
+            clipboardService: MockClipboardService(),
+            maxRecordingDurationSeconds: 0.05
+        )
+
+        var cancellables = Set<AnyCancellable>()
+        let transcribingExpectation = expectation(description: "auto stop moves to transcribing")
+        viewModel.$sessionPhase
+            .sink { phase in
+                if phase == .transcribing {
+                    transcribingExpectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
+        await viewModel.beginPushToTalk()
+        await fulfillment(of: [transcribingExpectation], timeout: 1.0)
+        XCTAssertFalse(viewModel.isRecording)
+        XCTAssertTrue(viewModel.isTranscribing)
+
+        transcribeClient.resume(with: "ok")
+    }
+
     func testHotkeyDownDuringTranscribingCancelsCurrentTranscription() async {
         let settings = AppSettings()
         settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
