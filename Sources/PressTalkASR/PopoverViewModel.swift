@@ -91,9 +91,9 @@ final class PopoverViewModel: ObservableObject {
         case .success:
             return "Copied to clipboard"
         case .warning:
-            return "Copied, but auto paste failed"
+            return "已复制，但自动粘贴失败"
         case .error:
-            return "No speech / Network"
+            return "未识别语音或网络异常"
         case .idle:
             return "Press and hold \(hotkeyDisplayText)"
         }
@@ -291,12 +291,12 @@ final class PopoverViewModel: ObservableObject {
             scheduleReset(after: 1.5)
         case .warning(let message):
             transientLock = true
-            setState(.warning(shortWarning(message)))
+            setState(.warning(PopoverMessageFormatter.shortWarning(message)))
             consumePopoverFeedbackDeferred()
             scheduleReset(after: 2.2)
         case .error(let message):
             transientLock = true
-            setState(.error(shortError(message)))
+            setState(.error(PopoverMessageFormatter.shortError(message)))
             consumePopoverFeedbackDeferred()
             scheduleReset(after: 2.0)
         }
@@ -307,23 +307,6 @@ final class PopoverViewModel: ObservableObject {
         withAnimation(.easeOut(duration: 0.18)) {
             state = newState
         }
-    }
-
-    private func shortError(_ message: String) -> String {
-        if message.lowercased().contains("network") || message.contains("网络") {
-            return "Network"
-        }
-        if message.contains("未识别") || message.contains("太短") {
-            return "No speech"
-        }
-        return "Try again"
-    }
-
-    private func shortWarning(_ message: String) -> String {
-        if message.contains("自动粘贴") || message.lowercased().contains("paste") {
-            return "Paste failed"
-        }
-        return "Warning"
     }
 
     private func scheduleReset(after delay: TimeInterval) {
