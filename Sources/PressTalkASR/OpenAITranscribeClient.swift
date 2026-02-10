@@ -69,91 +69,6 @@ enum OpenAITranscribeError: LocalizedError {
     }
 }
 
-private final class PrewarmGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private let minInterval: TimeInterval
-    private var lastStartAt: Date = .distantPast
-    private var inFlight = false
-
-    init(minInterval: TimeInterval) {
-        self.minInterval = minInterval
-    }
-
-    func beginIfNeeded() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let now = Date()
-        guard !inFlight else { return false }
-        guard now.timeIntervalSince(lastStartAt) >= minInterval else { return false }
-        inFlight = true
-        lastStartAt = now
-        return true
-    }
-
-    func finish() {
-        lock.lock()
-        inFlight = false
-        lock.unlock()
-    }
-}
-
-private final class KeepWarmController: @unchecked Sendable {
-    private let lock = NSLock()
-    private let queue = DispatchQueue(label: "com.xingkong.PressTalkASR.keep-warm")
-    private var timer: DispatchSourceTimer?
-    private var keepWarmUntil: Date = .distantPast
-
-    deinit {
-        cancelTimer()
-    }
-
-    func extendWindow(
-        by seconds: TimeInterval,
-        tickInterval: TimeInterval,
-        onTick: @escaping @Sendable () -> Void
-    ) {
-        var timerToResume: DispatchSourceTimer?
-
-        lock.lock()
-        let deadline = Date().addingTimeInterval(seconds)
-        if deadline > keepWarmUntil {
-            keepWarmUntil = deadline
-        }
-        if timer == nil {
-            let newTimer = DispatchSource.makeTimerSource(queue: queue)
-            newTimer.schedule(deadline: .now() + tickInterval, repeating: tickInterval)
-            newTimer.setEventHandler { [weak self] in
-                guard let self else { return }
-                if self.isExpired() {
-                    self.cancelTimer()
-                    return
-                }
-                onTick()
-            }
-            timer = newTimer
-            timerToResume = newTimer
-        }
-        lock.unlock()
-
-        timerToResume?.resume()
-    }
-
-    private func isExpired() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return Date() >= keepWarmUntil
-    }
-
-    private func cancelTimer() {
-        lock.lock()
-        let existing = timer
-        timer = nil
-        lock.unlock()
-        existing?.cancel()
-    }
-}
-
 struct OpenAITranscribeClient {
     private struct MultipartStaticSections {
         let preamble: Data
@@ -186,6 +101,11 @@ struct OpenAITranscribeClient {
     private let session: URLSession
     private let prewarmGate = PrewarmGate(minInterval: Constants.prewarmMinInterval)
     private let keepWarmController = KeepWarmController()
+    private let streamEventParser = TranscriptionStreamEventParser()
+    private let retryPolicy = TranscribeRetryPolicy(
+        maxAttempts: Constants.maxRetryAttempts,
+        initialDelayNs: Constants.initialRetryDelayNs
+    )
 
     init() {
         let configuration = URLSessionConfiguration.default
@@ -262,8 +182,8 @@ struct OpenAITranscribeClient {
             throw OpenAITranscribeError.fileTooLarge
         }
 
-        var retryDelay = Constants.initialRetryDelayNs
-        for attempt in 0..<Constants.maxRetryAttempts {
+        var retryDelay = retryPolicy.initialDelayNs
+        for attempt in 0..<retryPolicy.maxAttempts {
             do {
                 let multipart = try makeStreamingMultipartRequest(
                     fileURL: fileURL,
@@ -278,16 +198,15 @@ struct OpenAITranscribeClient {
                     writerTask: multipart.writerTask
                 )
             } catch let error as OpenAITranscribeError {
-                let shouldRetry = shouldRetry(error: error)
-                if !shouldRetry || attempt == Constants.maxRetryAttempts - 1 {
+                if !retryPolicy.shouldRetry(error) || attempt == retryPolicy.maxAttempts - 1 {
                     throw error
                 }
                 try await Task.sleep(nanoseconds: retryDelay)
-                retryDelay *= 2
+                retryDelay = retryPolicy.nextDelay(after: retryDelay)
             } catch {
-                if attempt == Constants.maxRetryAttempts - 1 { throw error }
+                if attempt == retryPolicy.maxAttempts - 1 { throw error }
                 try await Task.sleep(nanoseconds: retryDelay)
-                retryDelay *= 2
+                retryDelay = retryPolicy.nextDelay(after: retryDelay)
             }
         }
 
@@ -349,7 +268,7 @@ struct OpenAITranscribeClient {
                     break
                 }
 
-                switch parseStreamEvent(payload) {
+                switch streamEventParser.parse(payload: payload) {
                 case .delta(let delta):
                     guard !delta.isEmpty else { continue }
                     aggregated.append(delta)
@@ -434,17 +353,6 @@ struct OpenAITranscribeClient {
         request.setValue(String(contentLength), forHTTPHeaderField: "Content-Length")
         request.networkServiceType = .responsiveData
         return request
-    }
-
-    private func shouldRetry(error: OpenAITranscribeError) -> Bool {
-        switch error {
-        case .timeout, .network:
-            return true
-        case .server(let status, _):
-            return status == 408 || status == 429 || status >= 500
-        default:
-            return false
-        }
     }
 
     private func parseErrorMessage(from data: Data) -> String? {
@@ -669,85 +577,6 @@ struct OpenAITranscribeClient {
         default:
             return "application/octet-stream"
         }
-    }
-
-    private enum ParsedStreamEvent {
-        case delta(String)
-        case done(String)
-        case error(String)
-        case ignore
-    }
-
-    private func parseStreamEvent(_ payload: String) -> ParsedStreamEvent {
-        guard let data = payload.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return .ignore
-        }
-
-        let eventType = (object["type"] as? String) ?? (object["event"] as? String) ?? ""
-        if eventType == "error" {
-            let message = extractString(from: object, keys: ["message", "error"]) ?? "Unknown streaming error"
-            return .error(message)
-        }
-        if let errorObject = object["error"] as? [String: Any],
-           let message = errorObject["message"] as? String,
-           !message.isEmpty {
-            return .error(message)
-        }
-
-        if eventType.contains("delta") {
-            let delta = extractString(from: object, keys: ["delta", "text"]) ?? ""
-            return .delta(delta)
-        }
-
-        if eventType.contains("done") {
-            let text = extractString(from: object, keys: ["text", "transcript"]) ?? ""
-            return .done(text)
-        }
-
-        if let delta = extractString(from: object, keys: ["delta"]), !delta.isEmpty {
-            return .delta(delta)
-        }
-
-        if let text = extractString(from: object, keys: ["text"]), !text.isEmpty {
-            return .done(text)
-        }
-
-        return .ignore
-    }
-
-    private func extractString(from object: [String: Any], keys: [String]) -> String? {
-        for key in keys {
-            if let value = object[key] as? String, !value.isEmpty {
-                return value
-            }
-            if let nested = object[key] as? [String: Any],
-               let nestedText = extractString(from: nested, keys: keys) {
-                return nestedText
-            }
-            if let array = object[key] as? [[String: Any]] {
-                for item in array {
-                    if let nestedText = extractString(from: item, keys: keys) {
-                        return nestedText
-                    }
-                }
-            }
-        }
-
-        for value in object.values {
-            if let nested = value as? [String: Any],
-               let nestedText = extractString(from: nested, keys: keys) {
-                return nestedText
-            }
-            if let array = value as? [[String: Any]] {
-                for item in array {
-                    if let nestedText = extractString(from: item, keys: keys) {
-                        return nestedText
-                    }
-                }
-            }
-        }
-        return nil
     }
 
     private func consumeBytes(_ bytes: URLSession.AsyncBytes) async throws -> Data {
