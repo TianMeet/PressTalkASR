@@ -13,8 +13,18 @@ enum HUDMode: Equatable {
 @MainActor
 final class HUDStateMachine: ObservableObject {
     struct AutoDismiss {
-        var successDelay: TimeInterval = 1.5
+        var successDelayMin: TimeInterval = 1.5
+        var successDelayMax: TimeInterval = 4.0
+        var successDelayCharsPerSecond: Double = 15.0
         var errorDelay: TimeInterval = 3.0
+
+        func successDelay(for text: String) -> TimeInterval {
+            guard successDelayCharsPerSecond > 0 else { return successDelayMin }
+            let count = Double(text.trimmingCharacters(in: .whitespacesAndNewlines).count)
+            guard count > 0 else { return successDelayMin }
+            let dynamicDelay = count / successDelayCharsPerSecond
+            return max(successDelayMin, min(successDelayMax, dynamicDelay))
+        }
     }
 
     private enum Animation {
@@ -57,7 +67,7 @@ final class HUDStateMachine: ObservableObject {
 
     func showSuccess(_ text: String) {
         transition(to: .success(text))
-        scheduleDismiss(after: autoDismiss.successDelay)
+        scheduleDismiss(after: autoDismiss.successDelay(for: text))
     }
 
     func showError(_ reason: String) {
