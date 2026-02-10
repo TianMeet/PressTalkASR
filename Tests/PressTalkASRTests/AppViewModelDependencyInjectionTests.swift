@@ -96,6 +96,57 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         transcribeClient.resume(with: "ok")
     }
 
+    func testHotkeyDownDuringTranscribingShowsBusyHint() async {
+        let settings = AppSettings()
+        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+
+        let hotkeyManager = MockHotkeyManager()
+        let audioRecorder = MockAudioRecorder()
+        let transcribeClient = BlockingTranscribeClient()
+        let hudPresenter = MockHUDPresenter()
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appvm-hotkey-busy-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        let audioData = Data(repeating: 1, count: 2048)
+        FileManager.default.createFile(atPath: sourceURL.path, contents: audioData)
+        audioRecorder.recordingURL = sourceURL
+        audioRecorder.lastDuration = 0.6
+
+        let viewModel = AppViewModel(
+            settings: settings,
+            costTracker: CostTracker(),
+            hotkeyManager: hotkeyManager,
+            audioRecorder: audioRecorder,
+            vadTrimmer: MockVADTrimmer(),
+            transcribeClient: transcribeClient,
+            hudPresenter: hudPresenter,
+            clipboardService: MockClipboardService()
+        )
+
+        var cancellables = Set<AnyCancellable>()
+        let transcribingExpectation = expectation(description: "phase becomes transcribing")
+        viewModel.$sessionPhase
+            .sink { phase in
+                if phase == .transcribing {
+                    transcribingExpectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
+        await viewModel.beginPushToTalk()
+        await viewModel.endPushToTalk()
+        await fulfillment(of: [transcribingExpectation], timeout: 1.0)
+
+        hotkeyManager.onKeyDown?()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertTrue(hudPresenter.transcribingPreviews.contains("正在转写中，请稍候…"))
+        XCTAssertGreaterThanOrEqual(hudPresenter.showTranscribingCallCount, 2)
+
+        transcribeClient.resume(with: "ok")
+    }
+
     private func makeViewModel(
         settings: AppSettings,
         hotkeyManager: MockHotkeyManager
@@ -208,12 +259,18 @@ private final class BlockingTranscribeClient: TranscriptionServicing {
 private final class MockHUDPresenter: HUDPresenting {
     var onRetry: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    private(set) var showTranscribingCallCount = 0
+    private(set) var transcribingPreviews: [String] = []
 
     func updateDisplaySettings(autoPasteEnabled: Bool, languageMode: String, modelMode: String) {}
     func updateRMS(_ rms: Float) {}
     func showListening() {}
-    func showTranscribing() {}
-    func updateTranscribingPreview(_ text: String) {}
+    func showTranscribing() {
+        showTranscribingCallCount += 1
+    }
+    func updateTranscribingPreview(_ text: String) {
+        transcribingPreviews.append(text)
+    }
     func showSuccess(_ text: String) {}
     func showError(_ reason: String) {}
     func runDemoSequence() {}

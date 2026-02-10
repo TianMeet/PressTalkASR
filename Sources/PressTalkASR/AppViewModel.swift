@@ -135,6 +135,8 @@ final class AppViewModel: ObservableObject {
         static let autoStopDebounceNs: UInt64 = 80_000_000      // 80 ms
         /// Debug 日志最小输出间隔
         static let debugLogMinInterval: TimeInterval = 0.15
+        /// 转写中再次按下快捷键时的提示
+        static let transcribingBusyHint = "正在转写中，请稍候…"
     }
 
     @Published private(set) var sessionPhase: SessionPhase = .idle
@@ -269,7 +271,13 @@ final class AppViewModel: ObservableObject {
     }
 
     private func handleHotkeyDown() async {
-        guard !isRecording, !isTranscribing else { return }
+        if isTranscribing {
+            hudPresenter.showTranscribing()
+            hudPresenter.updateTranscribingPreview(Constants.transcribingBusyHint)
+            return
+        }
+
+        guard !isRecording else { return }
         await startListening()
     }
 
