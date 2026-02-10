@@ -69,7 +69,7 @@ enum OpenAITranscribeError: LocalizedError {
     }
 }
 
-struct OpenAITranscribeClient {
+final class OpenAITranscribeClient {
     private struct MultipartStaticSections {
         let preamble: Data
         let epilogue: Data
@@ -78,7 +78,124 @@ struct OpenAITranscribeClient {
 
     private struct StreamingMultipartRequest {
         let request: URLRequest
-        let writerTask: Task<Void, Error>
+        let writerHandle: MultipartWriterHandle
+    }
+
+    private final class MultipartWriterHandle {
+        private final class Worker: NSObject {
+            weak var owner: MultipartWriterHandle?
+            let preamble: Data
+            let fileURL: URL
+            let epilogue: Data
+            let outputStream: OutputStream
+
+            init(
+                owner: MultipartWriterHandle,
+                preamble: Data,
+                fileURL: URL,
+                epilogue: Data,
+                outputStream: OutputStream
+            ) {
+                self.owner = owner
+                self.preamble = preamble
+                self.fileURL = fileURL
+                self.epilogue = epilogue
+                self.outputStream = outputStream
+            }
+
+            @objc func run() {
+                guard let owner else { return }
+                let result: Result<Void, Error>
+                do {
+                    try OpenAITranscribeClient.streamMultipartBody(
+                        preamble: preamble,
+                        fileURL: fileURL,
+                        epilogue: epilogue,
+                        outputStream: outputStream,
+                        isCancelled: { [weak owner] in owner?.currentCancellationState() ?? true }
+                    )
+                    result = .success(())
+                } catch {
+                    result = .failure(error)
+                }
+                owner.finish(with: result)
+            }
+        }
+
+        private let lock = NSLock()
+        private var result: Result<Void, Error>?
+        private var waiters: [CheckedContinuation<Void, Error>] = []
+        private var isCancelled = false
+        private let outputStream: OutputStream
+        private var worker: Worker?
+
+        init(preamble: Data, fileURL: URL, epilogue: Data, outputStream: OutputStream) {
+            self.outputStream = outputStream
+            let worker = Worker(
+                owner: self,
+                preamble: preamble,
+                fileURL: fileURL,
+                epilogue: epilogue,
+                outputStream: outputStream
+            )
+            self.worker = worker
+            let thread = Thread(target: worker, selector: #selector(Worker.run), object: nil)
+            thread.qualityOfService = .userInitiated
+            thread.start()
+        }
+
+        func waitForCompletion() async throws {
+            if let existing = currentResult() {
+                return try existing.get()
+            }
+
+            return try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                if let result {
+                    lock.unlock()
+                    continuation.resume(with: result)
+                    return
+                }
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
+
+        func cancel() {
+            lock.lock()
+            isCancelled = true
+            lock.unlock()
+            outputStream.close()
+        }
+
+        private func currentResult() -> Result<Void, Error>? {
+            lock.lock()
+            defer { lock.unlock() }
+            return result
+        }
+
+        private func currentCancellationState() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return isCancelled
+        }
+
+        private func finish(with result: Result<Void, Error>) {
+            lock.lock()
+            guard self.result == nil else {
+                lock.unlock()
+                return
+            }
+            self.result = result
+            let continuations = waiters
+            waiters.removeAll()
+            worker = nil
+            lock.unlock()
+
+            for continuation in continuations {
+                continuation.resume(with: result)
+            }
+        }
     }
 
     private enum Constants {
@@ -193,10 +310,7 @@ struct OpenAITranscribeClient {
                     streaming: false,
                     apiKey: apiKey
                 )
-                return try await performDataRequest(
-                    request: multipart.request,
-                    writerTask: multipart.writerTask
-                )
+                return try await performDataRequest(request: multipart.request, writerHandle: multipart.writerHandle)
             } catch let error as OpenAITranscribeError {
                 if !retryPolicy.shouldRetry(error) || attempt == retryPolicy.maxAttempts - 1 {
                     throw error
@@ -236,7 +350,7 @@ struct OpenAITranscribeClient {
 
         do {
             let (bytes, response) = try await session.bytes(for: multipart.request)
-            try await awaitWriterCompletion(multipart.writerTask)
+            try await awaitWriterCompletion(multipart.writerHandle)
             guard let http = response as? HTTPURLResponse else {
                 throw OpenAITranscribeError.invalidResponse
             }
@@ -291,7 +405,7 @@ struct OpenAITranscribeClient {
             }
             throw OpenAITranscribeError.emptyText
         } catch let error as URLError {
-            multipart.writerTask.cancel()
+            multipart.writerHandle.cancel()
             switch error.code {
             case .timedOut:
                 throw OpenAITranscribeError.timeout
@@ -299,15 +413,15 @@ struct OpenAITranscribeClient {
                 throw OpenAITranscribeError.network(error.localizedDescription)
             }
         } catch {
-            multipart.writerTask.cancel()
+            multipart.writerHandle.cancel()
             throw error
         }
     }
 
-    private func performDataRequest(request: URLRequest, writerTask: Task<Void, Error>) async throws -> String {
+    private func performDataRequest(request: URLRequest, writerHandle: MultipartWriterHandle) async throws -> String {
         do {
             let (data, response) = try await session.data(for: request)
-            try await awaitWriterCompletion(writerTask)
+            try await awaitWriterCompletion(writerHandle)
             guard let http = response as? HTTPURLResponse else {
                 throw OpenAITranscribeError.invalidResponse
             }
@@ -332,7 +446,7 @@ struct OpenAITranscribeClient {
                 throw OpenAITranscribeError.server(status: http.statusCode, message: message)
             }
         } catch let error as URLError {
-            writerTask.cancel()
+            writerHandle.cancel()
             switch error.code {
             case .timedOut:
                 throw OpenAITranscribeError.timeout
@@ -340,7 +454,7 @@ struct OpenAITranscribeClient {
                 throw OpenAITranscribeError.network(error.localizedDescription)
             }
         } catch {
-            writerTask.cancel()
+            writerHandle.cancel()
             throw error
         }
     }
@@ -401,16 +515,14 @@ struct OpenAITranscribeClient {
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         }
 
-        let writerTask = Task.detached(priority: .userInitiated) {
-            try self.streamMultipartBody(
-                preamble: sections.preamble,
-                fileURL: fileURL,
-                epilogue: sections.epilogue,
-                outputStream: output
-            )
-        }
+        let writerHandle = MultipartWriterHandle(
+            preamble: sections.preamble,
+            fileURL: fileURL,
+            epilogue: sections.epilogue,
+            outputStream: output
+        )
 
-        return StreamingMultipartRequest(request: request, writerTask: writerTask)
+        return StreamingMultipartRequest(request: request, writerHandle: writerHandle)
     }
 
     private func makeMultipartStaticSections(
@@ -466,22 +578,23 @@ struct OpenAITranscribeClient {
         return (input, output)
     }
 
-    private func streamMultipartBody(
+    private static func streamMultipartBody(
         preamble: Data,
         fileURL: URL,
         epilogue: Data,
-        outputStream: OutputStream
+        outputStream: OutputStream,
+        isCancelled: @escaping () -> Bool = { Task.isCancelled }
     ) throws {
         outputStream.open()
         defer { outputStream.close() }
 
-        try writeToStream(outputStream, data: preamble)
+        try writeToStream(outputStream, data: preamble, isCancelled: isCancelled)
 
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
         defer { try? fileHandle.close() }
 
         while true {
-            if Task.isCancelled {
+            if isCancelled() {
                 throw CancellationError()
             }
 
@@ -489,13 +602,17 @@ struct OpenAITranscribeClient {
             if chunk.isEmpty {
                 break
             }
-            try writeToStream(outputStream, data: chunk)
+            try writeToStream(outputStream, data: chunk, isCancelled: isCancelled)
         }
 
-        try writeToStream(outputStream, data: epilogue)
+        try writeToStream(outputStream, data: epilogue, isCancelled: isCancelled)
     }
 
-    private func writeToStream(_ stream: OutputStream, data: Data) throws {
+    private static func writeToStream(
+        _ stream: OutputStream,
+        data: Data,
+        isCancelled: @escaping () -> Bool = { Task.isCancelled }
+    ) throws {
         if data.isEmpty { return }
 
         try data.withUnsafeBytes { rawBuffer in
@@ -503,7 +620,7 @@ struct OpenAITranscribeClient {
             var written = 0
             var stalledAt: Date?
             while written < data.count {
-                if Task.isCancelled {
+                if isCancelled() {
                     throw CancellationError()
                 }
 
@@ -550,9 +667,9 @@ struct OpenAITranscribeClient {
         }
     }
 
-    private func awaitWriterCompletion(_ writerTask: Task<Void, Error>) async throws {
+    private func awaitWriterCompletion(_ writerHandle: MultipartWriterHandle) async throws {
         do {
-            try await writerTask.value
+            try await writerHandle.waitForCompletion()
         } catch is CancellationError {
             throw OpenAITranscribeError.network("上传被取消。")
         } catch let error as OpenAITranscribeError {
