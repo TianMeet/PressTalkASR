@@ -37,7 +37,8 @@ final class FloatingHUDWindow {
         static let showOffsetY: CGFloat = -6
         static let hideDriftY: CGFloat = 6
         static let hideAlphaPower: CGFloat = 1.75
-        static let tickMilliseconds = 8
+        // 60 FPS is enough for HUD transitions and avoids extra wakeups on most displays.
+        static let tickMilliseconds = 16
     }
 
     private let panel: HUDPanel
