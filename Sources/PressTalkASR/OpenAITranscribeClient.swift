@@ -580,11 +580,12 @@ struct OpenAITranscribeClient {
     }
 
     private func consumeBytes(_ bytes: URLSession.AsyncBytes) async throws -> Data {
-        var data = Data()
+        var collected = [UInt8]()
+        collected.reserveCapacity(4096)
         for try await byte in bytes {
-            data.append(byte)
+            collected.append(byte)
         }
-        return data
+        return Data(collected)
     }
 
     private func schedulePrewarmPingIfNeeded() {
