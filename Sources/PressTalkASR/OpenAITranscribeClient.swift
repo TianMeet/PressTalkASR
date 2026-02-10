@@ -9,9 +9,9 @@ enum OpenAIModel: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .gpt4oMiniTranscribe:
-            return "gpt-4o-mini-transcribe (Cost)"
+            return L10n.tr("model.gpt4o_mini_display")
         case .gpt4oTranscribe:
-            return "gpt-4o-transcribe (Accuracy)"
+            return L10n.tr("model.gpt4o_display")
         }
     }
 
@@ -37,19 +37,19 @@ enum OpenAITranscribeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .fileTooLarge:
-            return "录音太长，请缩短（超过 25MB 上传限制）。"
+            return L10n.tr("error.openai.file_too_large")
         case .unauthorized:
-            return "API Key 无效或未授权（401）。"
+            return L10n.tr("error.openai.unauthorized")
         case .timeout:
-            return "请求超时，请检查网络后重试。"
+            return L10n.tr("error.openai.timeout")
         case .network(let message):
-            return "网络错误：\(message)"
+            return L10n.tr("error.openai.network_format", message)
         case .server(let status, let message):
-            return "服务错误（\(status)）：\(message)"
+            return L10n.tr("error.openai.server_format", status, message)
         case .invalidResponse:
-            return "服务返回格式无法解析。"
+            return L10n.tr("error.openai.invalid_response")
         case .emptyText:
-            return "未识别到可用文本。"
+            return L10n.tr("error.openai.empty_text")
         }
     }
 
@@ -246,7 +246,7 @@ struct OpenAITranscribeClient {
                 if http.statusCode == 401 {
                     throw OpenAITranscribeError.unauthorized
                 }
-                let message = parseErrorMessage(from: payload) ?? "Unknown server error"
+                let message = parseErrorMessage(from: payload) ?? L10n.tr("error.openai.unknown_server")
                 throw OpenAITranscribeError.server(status: http.statusCode, message: message)
             }
 
@@ -324,11 +324,11 @@ struct OpenAITranscribeClient {
                 throw OpenAITranscribeError.unauthorized
 
             case 408, 429, 500...599:
-                let message = parseErrorMessage(from: data) ?? "Temporary server issue"
+                let message = parseErrorMessage(from: data) ?? L10n.tr("error.openai.temp_server_issue")
                 throw OpenAITranscribeError.server(status: http.statusCode, message: message)
 
             default:
-                let message = parseErrorMessage(from: data) ?? "Unknown server error"
+                let message = parseErrorMessage(from: data) ?? L10n.tr("error.openai.unknown_server")
                 throw OpenAITranscribeError.server(status: http.statusCode, message: message)
             }
         } catch let error as URLError {
@@ -509,7 +509,9 @@ struct OpenAITranscribeClient {
 
                 if !stream.hasSpaceAvailable {
                     if let streamError = stream.streamError {
-                        throw OpenAITranscribeError.network("写入上传流失败：\(streamError.localizedDescription)")
+                        throw OpenAITranscribeError.network(
+                            L10n.tr("error.openai.upload_stream_write_failed_format", streamError.localizedDescription)
+                        )
                     }
                     if stream.streamStatus == .closed || stream.streamStatus == .error {
                         throw OpenAITranscribeError.network("上传流已关闭。")
@@ -530,7 +532,9 @@ struct OpenAITranscribeClient {
                 }
                 if count < 0 {
                     let message = stream.streamError?.localizedDescription ?? "Unknown stream write error"
-                    throw OpenAITranscribeError.network("写入上传流失败：\(message)")
+                    throw OpenAITranscribeError.network(
+                        L10n.tr("error.openai.upload_stream_write_failed_format", message)
+                    )
                 }
 
                 if stream.streamStatus == .atEnd || stream.streamStatus == .closed || stream.streamStatus == .error {
@@ -554,7 +558,9 @@ struct OpenAITranscribeClient {
         } catch let error as OpenAITranscribeError {
             throw error
         } catch {
-            throw OpenAITranscribeError.network("上传流写入失败：\(error.localizedDescription)")
+            throw OpenAITranscribeError.network(
+                L10n.tr("error.openai.upload_stream_failed_format", error.localizedDescription)
+            )
         }
     }
 

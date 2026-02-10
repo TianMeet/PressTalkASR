@@ -10,11 +10,11 @@ enum PermissionState {
     var label: String {
         switch self {
         case .granted:
-            return "Granted"
+            return L10n.tr("permission.state.granted")
         case .notGranted:
-            return "Not Granted"
+            return L10n.tr("permission.state.not_granted")
         case .unknown:
-            return "Unknown"
+            return L10n.tr("permission.state.unknown")
         }
     }
 }

@@ -31,7 +31,7 @@ struct MenuBarPanelView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("PressTalk ASR")
                         .font(.system(size: 14, weight: .semibold))
-                    Text("Cloud speech-to-text")
+                    Text(L10n.tr("menubar.header.subtitle"))
                         .font(.system(size: 11))
                         .foregroundStyle(UITheme.secondaryText)
                 }
@@ -51,7 +51,7 @@ struct MenuBarPanelView: View {
                 } label: {
                     HStack {
                         Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                        Text(viewModel.isRecording ? "Stop Recording" : "Start Recording")
+                        Text(viewModel.isRecording ? L10n.tr("menubar.button.stop_recording") : L10n.tr("menubar.button.start_recording"))
                             .fontWeight(.semibold)
                         Spacer()
                         KeycapView(settings.hotkeyShortcut.keycapTokens)
@@ -68,7 +68,7 @@ struct MenuBarPanelView: View {
                 .buttonStyle(.plain)
 
                 HStack {
-                    Text("Today: \(formatDuration(costTracker.secondsToday()))")
+                    Text(L10n.tr("menubar.metric.today_format", formatDuration(costTracker.secondsToday())))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(UITheme.secondaryText)
                     Spacer()
@@ -84,12 +84,12 @@ struct MenuBarPanelView: View {
         GlassCard {
             VStack(spacing: 10) {
                 Toggle(isOn: $settings.autoPasteEnabled) {
-                    Label("Auto Paste", systemImage: "arrow.down.doc")
+                    Label(L10n.tr("menubar.toggle.auto_paste"), systemImage: "arrow.down.doc")
                 }
                 .toggleStyle(.switch)
 
                 Toggle(isOn: $settings.enableVADTrim) {
-                    Label("VAD Trim", systemImage: "waveform.and.mic")
+                    Label(L10n.tr("menubar.toggle.vad_trim"), systemImage: "waveform.and.mic")
                 }
                 .toggleStyle(.switch)
             }
@@ -103,21 +103,21 @@ struct MenuBarPanelView: View {
                 Button {
                     viewModel.runHUDDemo()
                 } label: {
-                    footerButtonLabel("HUD Demo", "sparkles")
+                    footerButtonLabel(L10n.tr("menubar.footer.hud_demo"), "sparkles")
                 }
                 .buttonStyle(.plain)
 
                 Button {
                     viewModel.openSettingsWindow()
                 } label: {
-                    footerButtonLabel("Settings", "gearshape")
+                    footerButtonLabel(L10n.tr("menubar.footer.settings"), "gearshape")
                 }
                 .buttonStyle(.plain)
 
                 Button {
                     NSApplication.shared.terminate(nil)
                 } label: {
-                    footerButtonLabel("Quit", "xmark.circle")
+                    footerButtonLabel(L10n.tr("menubar.footer.quit"), "xmark.circle")
                 }
                 .buttonStyle(.plain)
             }

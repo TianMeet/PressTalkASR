@@ -35,7 +35,7 @@ struct PopoverRootView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("PressTalk ASR")
                     .font(.system(size: 13.5, weight: .semibold))
-                Text("Cloud speech-to-text")
+                Text(L10n.tr("popover.header.subtitle"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             }
@@ -93,19 +93,19 @@ struct PopoverRootView: View {
                 }
 
                 HStack {
-                    Text("Today \(viewModel.todayDurationText)")
+                    Text(L10n.tr("popover.metric.today_format", viewModel.todayDurationText))
                         .font(.system(size: 11.5, weight: .regular))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                     Spacer()
-                    Text("Estimated \(viewModel.estimatedCostText)")
+                    Text(L10n.tr("popover.metric.estimated_format", viewModel.estimatedCostText))
                         .font(.system(size: 11.5, weight: .regular))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
 
                 HStack {
-                    Button("Click to Toggle Recording") {
+                    Button(L10n.tr("popover.button.toggle_recording")) {
                         viewModel.clickToggleRecording()
                     }
                     .buttonStyle(.borderless)
@@ -124,8 +124,8 @@ struct PopoverRootView: View {
             VStack(spacing: 10) {
                 SettingsRow(
                     icon: "waveform.and.mic",
-                    title: "Enable VAD Trim",
-                    subtitle: "Trim leading and trailing silence",
+                    title: L10n.tr("popover.setting.vad_trim.title"),
+                    subtitle: L10n.tr("popover.setting.vad_trim.subtitle"),
                     isOn: Binding(
                         get: { viewModel.vadEnabled },
                         set: { value in
@@ -140,8 +140,8 @@ struct PopoverRootView: View {
 
                 SettingsRow(
                     icon: "arrow.down.doc",
-                    title: "Auto Paste",
-                    subtitle: "Paste recognized text to front app",
+                    title: L10n.tr("popover.setting.auto_paste.title"),
+                    subtitle: L10n.tr("popover.setting.auto_paste.subtitle"),
                     isOn: Binding(
                         get: { viewModel.autoPasteEnabled },
                         set: { value in
@@ -151,8 +151,8 @@ struct PopoverRootView: View {
                         }
                     ),
                     isDisabled: viewModel.autoPasteNeedsPermission && !viewModel.autoPasteEnabled,
-                    badgeText: viewModel.autoPasteNeedsPermission ? "Needs permission" : nil,
-                    trailingActionTitle: viewModel.autoPasteNeedsPermission ? "Open" : nil,
+                    badgeText: viewModel.autoPasteNeedsPermission ? L10n.tr("popover.setting.permission_required") : nil,
+                    trailingActionTitle: viewModel.autoPasteNeedsPermission ? L10n.tr("popover.action.open") : nil,
                     trailingAction: viewModel.autoPasteNeedsPermission ? { viewModel.openAccessibilitySettings() } : nil
                 )
 
@@ -161,7 +161,7 @@ struct PopoverRootView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(.orange)
-                        Text("Auto Paste requires Accessibility permission")
+                        Text(L10n.tr("popover.hint.auto_paste_permission"))
                             .font(.system(size: 11.5, weight: .regular))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -173,8 +173,8 @@ struct PopoverRootView: View {
 
     private var footerSection: some View {
         HStack(spacing: 8) {
-            footerButton("Settings", "gearshape", action: viewModel.openSettings)
-            footerButton("Quit", "xmark.circle", action: viewModel.quit)
+            footerButton(L10n.tr("popover.footer.settings"), "gearshape", action: viewModel.openSettings)
+            footerButton(L10n.tr("popover.footer.quit"), "xmark.circle", action: viewModel.quit)
         }
     }
 

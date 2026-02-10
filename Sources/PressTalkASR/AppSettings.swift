@@ -11,11 +11,11 @@ final class AppSettings: ObservableObject {
         var title: String {
             switch self {
             case .localCache:
-                return "Local Cache"
+                return L10n.tr("settings.api_source.local_cache")
             case .environment:
-                return "Environment"
+                return L10n.tr("settings.api_source.environment")
             case .none:
-                return "Not Set"
+                return L10n.tr("settings.api_source.not_set")
             }
         }
     }
@@ -26,7 +26,16 @@ final class AppSettings: ObservableObject {
         case english = "English"
 
         var id: String { rawValue }
-        var displayName: String { rawValue }
+        var displayName: String {
+            switch self {
+            case .auto:
+                return L10n.tr("settings.language.auto")
+            case .chinese:
+                return L10n.tr("settings.language.chinese")
+            case .english:
+                return L10n.tr("settings.language.english")
+            }
+        }
     }
 
     private enum Keys {

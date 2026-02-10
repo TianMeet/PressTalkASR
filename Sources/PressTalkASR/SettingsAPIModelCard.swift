@@ -13,10 +13,10 @@ struct SettingsAPIModelCard: View {
     var body: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 14) {
-                cardTitle("API & Model", "cloud")
+                cardTitle(L10n.tr("settings.card.api_model"), "cloud")
 
                 HStack {
-                    Text("API Key Source")
+                    Text(L10n.tr("settings.api_key_source"))
                         .font(.system(size: 12, weight: .medium))
                     Spacer()
                     Text(settings.apiKeySource().title)
@@ -32,7 +32,7 @@ struct SettingsAPIModelCard: View {
                                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                                     .foregroundStyle(.primary)
                                 Spacer()
-                                Text("Saved")
+                                Text(L10n.tr("settings.api_key.saved"))
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.secondary)
                             }
@@ -47,16 +47,16 @@ struct SettingsAPIModelCard: View {
                                     .stroke(Color.black.opacity(0.12), lineWidth: 0.8)
                             )
                         } else {
-                            SecureField("sk-...", text: $apiKeyInput)
+                            SecureField(L10n.tr("settings.api_key.placeholder"), text: $apiKeyInput)
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
 
-                    Button(showingMaskedAPIKey ? "Replace" : "Save") {
+                    Button(showingMaskedAPIKey ? L10n.tr("settings.api_key.replace") : L10n.tr("settings.api_key.save")) {
                         if showingMaskedAPIKey {
                             apiKeyInput = ""
                             showingMaskedAPIKey = false
-                            statusMessage = "请输入新的 Token 并保存。"
+                            statusMessage = L10n.tr("settings.api_key.enter_new")
                             return
                         }
 
@@ -70,20 +70,20 @@ struct SettingsAPIModelCard: View {
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Button("Clear") {
+                    Button(L10n.tr("settings.api_key.clear")) {
                         statusMessage = viewModel.clearAPIKey()
                         onSyncAPIKeyInputFromStorage()
                     }
                     .buttonStyle(.bordered)
                 }
 
-                Picker("Model", selection: deferredModelBinding) {
-                    Text("mini").tag(OpenAIModel.gpt4oMiniTranscribe.rawValue)
-                    Text("accurate").tag(OpenAIModel.gpt4oTranscribe.rawValue)
+                Picker(L10n.tr("settings.model.picker"), selection: deferredModelBinding) {
+                    Text(L10n.tr("settings.model.mini_short")).tag(OpenAIModel.gpt4oMiniTranscribe.rawValue)
+                    Text(L10n.tr("settings.model.accurate_short")).tag(OpenAIModel.gpt4oTranscribe.rawValue)
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Language", selection: deferredLanguageBinding) {
+                Picker(L10n.tr("settings.language.picker"), selection: deferredLanguageBinding) {
                     ForEach(AppSettings.LanguageMode.allCases) { mode in
                         Text(mode.displayName).tag(mode.rawValue)
                     }
@@ -93,18 +93,18 @@ struct SettingsAPIModelCard: View {
                 HStack(spacing: 10) {
                     modelHint(
                         title: "gpt-4o-mini-transcribe",
-                        subtitle: "$0.003/min, 成本优先",
+                        subtitle: L10n.tr("settings.model.mini.subtitle"),
                         selected: settings.selectedModel == .gpt4oMiniTranscribe
                     )
                     modelHint(
                         title: "gpt-4o-transcribe",
-                        subtitle: "$0.006/min, 准确率优先",
+                        subtitle: L10n.tr("settings.model.accurate.subtitle"),
                         selected: settings.selectedModel == .gpt4oTranscribe
                     )
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Prompt（术语表 / 标点风格）")
+                    Text(L10n.tr("settings.prompt.title"))
                         .font(.system(size: 12, weight: .medium))
                     TextEditor(text: $settings.customPrompt)
                         .font(.system(size: 13))
@@ -119,22 +119,22 @@ struct SettingsAPIModelCard: View {
                                 .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
                         )
 
-                    Toggle("满足条件时发送 Prompt", isOn: $settings.promptEnabled)
+                    Toggle(L10n.tr("settings.prompt.enable"), isOn: $settings.promptEnabled)
                         .font(.system(size: 12, weight: .medium))
 
                     HStack {
-                        Text("最短录音时长后才发送")
+                        Text(L10n.tr("settings.prompt.min_duration"))
                             .font(.system(size: 12))
                             .foregroundStyle(UITheme.secondaryText)
                         Spacer()
                         Stepper(value: $settings.promptMinDurationSeconds, in: 0.2...8.0, step: 0.2) {
-                            Text(String(format: "%.1f s", settings.promptMinDurationSeconds))
+                            Text(L10n.tr("unit.seconds_format", settings.promptMinDurationSeconds))
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         }
                         .controlSize(.small)
                     }
 
-                    Text("仅在 Prompt 非空且录音时长达到阈值时发送。")
+                    Text(L10n.tr("settings.prompt.hint"))
                         .font(.system(size: 11))
                         .foregroundStyle(UITheme.secondaryText)
                 }

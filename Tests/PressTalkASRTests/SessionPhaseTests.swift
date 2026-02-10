@@ -17,8 +17,8 @@ final class SessionPhaseTests: XCTestCase {
     }
 
     func testSessionStatusInitFromPhase() {
-        XCTAssertEqual(AppViewModel.SessionStatus(phase: .idle).title, "Idle")
-        XCTAssertEqual(AppViewModel.SessionStatus(phase: .listening).title, "Listening")
-        XCTAssertEqual(AppViewModel.SessionStatus(phase: .transcribing).title, "Transcribing")
+        XCTAssertEqual(AppViewModel.SessionStatus(phase: .idle).title, L10n.tr("status.idle"))
+        XCTAssertEqual(AppViewModel.SessionStatus(phase: .listening).title, L10n.tr("status.listening"))
+        XCTAssertEqual(AppViewModel.SessionStatus(phase: .transcribing).title, L10n.tr("status.transcribing"))
     }
 }

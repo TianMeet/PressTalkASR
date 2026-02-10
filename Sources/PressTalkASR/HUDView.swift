@@ -131,14 +131,14 @@ struct HUDView: View {
         case .listening:
             VStack(alignment: .leading, spacing: 6) {
                 AudioDotWaveView(levels: levelMeter.levels, color: stateColor)
-                Text("松开结束并转写")
+                Text(L10n.tr("hud.body.release_to_end_transcribe"))
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         case .transcribing(let preview):
             if preview.isEmpty {
-                Text("语音处理中，请稍候…")
+                Text(L10n.tr("hud.body.processing_wait"))
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -157,23 +157,23 @@ struct HUDView: View {
                 .truncationMode(.tail)
         case .error:
             VStack(alignment: .leading, spacing: 2) {
-                Text("没听清楚，再试一次？")
+                Text(L10n.tr("hud.body.retry_question"))
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text("尽量靠近麦克风或减少噪声")
+                Text(L10n.tr("hud.body.reduce_noise_hint"))
                     .font(.system(size: 11.5, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
                 if hoverVisible {
                     HStack(spacing: 12) {
-                        Button("重试") { onRetry() }
+                        Button(L10n.tr("hud.button.retry")) { onRetry() }
                             .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color.accentColor)
 
-                        Button("设置") { onOpenSettings() }
+                        Button(L10n.tr("hud.button.settings")) { onOpenSettings() }
                             .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color.accentColor)
@@ -200,13 +200,13 @@ struct HUDView: View {
     private var statusTitle: String {
         switch effectiveMode {
         case .listening:
-            return "Listening"
+            return L10n.tr("hud.status.listening")
         case .transcribing:
-            return "Transcribing"
+            return L10n.tr("hud.status.transcribing")
         case .success:
-            return "Done"
+            return L10n.tr("hud.status.done")
         case .error:
-            return "Try Again"
+            return L10n.tr("hud.status.retry")
         case .hidden:
             return ""
         }
@@ -217,11 +217,11 @@ struct HUDView: View {
         case .listening:
             return stateMachine.elapsedTimeText
         case .transcribing:
-            return settings.autoPasteEnabled ? "将自动复制并粘贴" : "将自动复制"
+            return settings.autoPasteEnabled ? L10n.tr("hud.hint.auto_copy_paste") : L10n.tr("hud.hint.auto_copy")
         case .success:
-            return settings.autoPasteEnabled ? "已复制并粘贴" : "已复制"
+            return settings.autoPasteEnabled ? L10n.tr("hud.hint.copied_pasted") : L10n.tr("hud.hint.copied")
         case .error:
-            return "按住重试"
+            return L10n.tr("hud.hint.hold_retry")
         case .hidden:
             return ""
         }

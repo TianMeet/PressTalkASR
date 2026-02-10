@@ -61,13 +61,13 @@ final class PopoverViewModel: ObservableObject {
     var statusPillModel: PopoverStatusPillModel {
         switch state {
         case .idle:
-            return PopoverStatusPillModel(text: "Idle", color: Color.blue.opacity(0.62), showsDot: true, showsSpinner: false)
+            return PopoverStatusPillModel(text: L10n.tr("popover.status.idle"), color: Color.blue.opacity(0.62), showsDot: true, showsSpinner: false)
         case .recording:
             return PopoverStatusPillModel(text: recordingElapsedText, color: Color.red.opacity(0.86), showsDot: true, showsSpinner: false)
         case .transcribing:
-            return PopoverStatusPillModel(text: "Transcribing", color: Color.indigo.opacity(0.86), showsDot: false, showsSpinner: true)
+            return PopoverStatusPillModel(text: L10n.tr("popover.status.transcribing"), color: Color.indigo.opacity(0.86), showsDot: false, showsSpinner: true)
         case .success:
-            return PopoverStatusPillModel(text: "Copied", color: Color.green.opacity(0.82), showsDot: true, showsSpinner: false)
+            return PopoverStatusPillModel(text: L10n.tr("popover.status.copied"), color: Color.green.opacity(0.82), showsDot: true, showsSpinner: false)
         case .warning(let message):
             return PopoverStatusPillModel(text: message, color: Color.orange.opacity(0.86), showsDot: true, showsSpinner: false)
         case .error(let reason):
@@ -77,25 +77,25 @@ final class PopoverViewModel: ObservableObject {
 
     var primaryTitle: String {
         if state == .recording || isPressingPrimary {
-            return "Release to Send"
+            return L10n.tr("popover.primary.release_to_send")
         }
-        return "Hold to Talk"
+        return L10n.tr("popover.primary.hold_to_talk")
     }
 
     var primarySubtitle: String {
         switch state {
         case .recording:
-            return "Listening…"
+            return L10n.tr("popover.subtitle.listening")
         case .transcribing:
-            return "Recognizing…"
+            return L10n.tr("popover.subtitle.recognizing")
         case .success:
-            return "Copied to clipboard"
+            return L10n.tr("popover.subtitle.copied_to_clipboard")
         case .warning:
             return PopoverMessageFormatter.warningSubtitle()
         case .error:
             return PopoverMessageFormatter.errorSubtitle()
         case .idle:
-            return "Press and hold \(hotkeyDisplayText)"
+            return L10n.tr("popover.subtitle.press_and_hold_format", hotkeyDisplayText)
         }
     }
 

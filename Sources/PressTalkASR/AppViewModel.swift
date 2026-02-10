@@ -92,9 +92,9 @@ final class AppViewModel: ObservableObject {
 
         var title: String {
             switch self {
-            case .idle: return "Idle"
-            case .listening: return "Listening"
-            case .transcribing: return "Transcribing"
+            case .idle: return L10n.tr("status.idle")
+            case .listening: return L10n.tr("status.listening")
+            case .transcribing: return L10n.tr("status.transcribing")
             }
         }
 
@@ -114,9 +114,9 @@ final class AppViewModel: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .missingAPIKey:
-                return "未找到 API Key，请在 Settings 中输入并保存。"
+                return L10n.tr("error.workflow.missing_api_key")
             case .recordingTooShort:
-                return "录音太短，请按住至少 0.2 秒再松开。"
+                return L10n.tr("error.workflow.recording_too_short")
             }
         }
     }
@@ -226,12 +226,14 @@ final class AppViewModel: ObservableObject {
 
         settings.$autoPasteEnabled
             .combineLatest(settings.$selectedModelRawValue, settings.$languageModeRawValue)
-            .sink { [weak self] autoPaste, model, language in
+            .sink { [weak self] autoPaste, modelRaw, languageRaw in
                 DispatchQueue.main.async { [weak self] in
+                    let modelDisplay = OpenAIModel(rawValue: modelRaw)?.displayName ?? modelRaw
+                    let languageDisplay = AppSettings.LanguageMode(rawValue: languageRaw)?.displayName ?? languageRaw
                     self?.hudPresenter.updateDisplaySettings(
                         autoPasteEnabled: autoPaste,
-                        languageMode: language,
-                        modelMode: model
+                        languageMode: languageDisplay,
+                        modelMode: modelDisplay
                     )
                 }
             }
@@ -325,7 +327,7 @@ final class AppViewModel: ObservableObject {
 
         let permissionGranted = await audioRecorder.requestPermission()
         guard permissionGranted else {
-            showError("没有麦克风权限，请在 Settings > Permissions 打开 Microphone 设置授权。")
+            showError(L10n.tr("error.mic_permission_denied"))
             return
         }
 
@@ -338,14 +340,14 @@ final class AppViewModel: ObservableObject {
 
             _ = try audioRecorder.startRecording()
             transition(to: .listening)
-            lastMessage = "Listening…"
+            lastMessage = L10n.tr("status.listening_ellipsis")
             hudPresenter.showListening()
             scheduleMaxRecordingGuard()
 
             // 录音开始即进入短周期连接保温，降低松开后冷连接概率。
             transcribeClient.keepWarmForInteractionWindow()
         } catch {
-            showError("录音启动失败：\(error.localizedDescription)")
+            showError(L10n.tr("error.recording_start_failed_format", error.localizedDescription))
         }
     }
 
@@ -367,7 +369,7 @@ final class AppViewModel: ObservableObject {
             sourceURL = try audioRecorder.stopRecording()
         } catch {
             recordingSessionCoordinator.abortStop()
-            showError("停止录音失败：\(error.localizedDescription)")
+            showError(L10n.tr("error.recording_stop_failed_format", error.localizedDescription))
             return
         }
 
@@ -383,7 +385,7 @@ final class AppViewModel: ObservableObject {
         }
 
         transition(to: .transcribing)
-        lastMessage = "Transcribing…"
+        lastMessage = L10n.tr("status.transcribing_ellipsis")
         hudPresenter.showTranscribing()
         // 停止录音后继续保温一小段时间，覆盖上传与首字阶段。
         transcribeClient.keepWarmForInteractionWindow()
@@ -509,7 +511,7 @@ final class AppViewModel: ObservableObject {
             clipboardService.copyToPasteboard(text)
             lastMessage = text
             hudPresenter.showSuccess(text)
-            popoverFeedback = .success("Copied")
+            popoverFeedback = .success(L10n.tr("feedback.copied"))
 
             if settings.autoPasteEnabled {
                 do {
@@ -518,7 +520,7 @@ final class AppViewModel: ObservableObject {
                 } catch is CancellationError {
                     // Transcription task canceled after copy; skip auto-paste.
                 } catch {
-                    popoverFeedback = .warning("已复制，自动粘贴失败")
+                    popoverFeedback = .warning(L10n.tr("warning.auto_paste_failed"))
                     logger.notice("Auto-paste failed after copy: \(error.localizedDescription, privacy: .public)")
                 }
             }
@@ -578,22 +580,22 @@ final class AppViewModel: ObservableObject {
 
     func saveAPIKey(_ value: String) -> String {
         settings.saveAPIKey(value)
-        return "API Key 已缓存到本地。"
+        return L10n.tr("settings.status.api_key_saved_local")
     }
 
     func updateHotkeyShortcut(_ shortcut: HotkeyShortcut) -> String {
         guard shortcut.isValid else {
-            return "快捷键无效：请至少包含一个修饰键。"
+            return L10n.tr("settings.status.hotkey_invalid")
         }
 
         let previous = settings.hotkeyShortcut
         do {
             try hotkeyManager.registerHotkey(shortcut)
             settings.hotkeyShortcut = shortcut
-            return "快捷键已更新为 \(shortcut.displayText)。"
+            return L10n.tr("settings.status.hotkey_updated_format", shortcut.displayText)
         } catch {
             try? hotkeyManager.registerHotkey(previous)
-            return "快捷键更新失败：\(error.localizedDescription)"
+            return L10n.tr("settings.status.hotkey_update_failed_format", error.localizedDescription)
         }
     }
 
@@ -603,7 +605,7 @@ final class AppViewModel: ObservableObject {
 
     func clearAPIKey() -> String {
         settings.clearAPIKey()
-        return "本地缓存的 API Key 已清除。"
+        return L10n.tr("settings.status.api_key_cleared_local")
     }
 
     private func showError(_ message: String) {

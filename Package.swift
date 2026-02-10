@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "PressTalkASR",
+    defaultLocalization: "zh-Hans",
     platforms: [
         .macOS(.v13)
     ],
@@ -14,6 +15,9 @@ let package = Package(
             name: "PressTalkASR",
             path: "Sources/PressTalkASR",
             exclude: ["Info.plist"],
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",

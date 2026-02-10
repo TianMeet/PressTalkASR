@@ -13,13 +13,13 @@ struct SettingsBehaviorCard: View {
     var body: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
-                cardTitle("Behavior", "switch.2")
+                cardTitle(L10n.tr("settings.card.behavior"), "switch.2")
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Global Hotkey")
-                            Text("用于开始/结束录音")
+                            Text(L10n.tr("settings.hotkey.title"))
+                            Text(L10n.tr("settings.hotkey.subtitle"))
                                 .font(.system(size: 11))
                                 .foregroundStyle(UITheme.secondaryText)
                         }
@@ -29,10 +29,10 @@ struct SettingsBehaviorCard: View {
                     }
 
                     HStack(spacing: 8) {
-                        Button(isRecordingHotkey ? "Press Keys..." : "Record Shortcut") {
+                        Button(isRecordingHotkey ? L10n.tr("settings.hotkey.recording_button") : L10n.tr("settings.hotkey.record_button")) {
                             if isRecordingHotkey {
                                 onStopHotkeyCapture()
-                                statusMessage = "已取消快捷键录制。"
+                                statusMessage = L10n.tr("settings.status.hotkey_capture_cancelled")
                             } else {
                                 onStartHotkeyCapture()
                             }
@@ -40,7 +40,7 @@ struct SettingsBehaviorCard: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
 
-                        Button("Reset Default") {
+                        Button(L10n.tr("settings.hotkey.reset_default")) {
                             onStopHotkeyCapture()
                             statusMessage = viewModel.resetHotkeyToDefault()
                         }
@@ -49,7 +49,7 @@ struct SettingsBehaviorCard: View {
                     }
 
                     if isRecordingHotkey {
-                        Text("按下新的组合键（需包含 ⌘ / ⌥ / ⌃ / ⇧），按 Esc 取消。")
+                        Text(L10n.tr("settings.hotkey.capture_hint"))
                             .font(.system(size: 11))
                             .foregroundStyle(UITheme.secondaryText)
                     }
@@ -59,8 +59,8 @@ struct SettingsBehaviorCard: View {
 
                 Toggle(isOn: $settings.enableVADTrim) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Enable VAD Trim")
-                        Text("录音前后自动裁剪静音片段")
+                        Text(L10n.tr("settings.toggle.vad_trim.title"))
+                        Text(L10n.tr("settings.toggle.vad_trim.subtitle"))
                             .font(.system(size: 11))
                             .foregroundStyle(UITheme.secondaryText)
                     }
@@ -68,8 +68,8 @@ struct SettingsBehaviorCard: View {
 
                 Toggle(isOn: $settings.autoPasteEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto Paste")
-                        Text("复制后自动发送 Cmd+V 到前台应用")
+                        Text(L10n.tr("settings.toggle.auto_paste.title"))
+                        Text(L10n.tr("settings.toggle.auto_paste.subtitle"))
                             .font(.system(size: 11))
                             .foregroundStyle(UITheme.secondaryText)
                     }
@@ -77,8 +77,8 @@ struct SettingsBehaviorCard: View {
 
                 Toggle(isOn: $settings.enableAutoStopOnSilence) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto Stop on Silence")
-                        Text("说完停顿后自动结束并转写")
+                        Text(L10n.tr("settings.toggle.auto_stop_silence.title"))
+                        Text(L10n.tr("settings.toggle.auto_stop_silence.subtitle"))
                             .font(.system(size: 11))
                             .foregroundStyle(UITheme.secondaryText)
                     }
@@ -86,13 +86,13 @@ struct SettingsBehaviorCard: View {
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("HUD Position")
-                        Text("转写浮窗显示位置")
+                        Text(L10n.tr("settings.hud.position.title"))
+                        Text(L10n.tr("settings.hud.position.subtitle"))
                             .font(.system(size: 11))
                             .foregroundStyle(UITheme.secondaryText)
                     }
                     Spacer()
-                    Picker("HUD Position", selection: hudAnchorSelection) {
+                    Picker(L10n.tr("settings.hud.position.picker"), selection: hudAnchorSelection) {
                         ForEach(HUDAnchorPosition.allCases) { anchor in
                             Text(anchor.displayName).tag(anchor.rawValue)
                         }
@@ -102,11 +102,11 @@ struct SettingsBehaviorCard: View {
                     .frame(width: 138)
                 }
 
-                DisclosureGroup("Advanced (Auto Stop)") {
+                DisclosureGroup(L10n.tr("settings.advanced.auto_stop")) {
                     VStack(alignment: .leading, spacing: 8) {
                         stepperRow(
-                            title: "Silence Threshold",
-                            valueText: String(format: "%.0f dB", settings.silenceThresholdDB)
+                            title: L10n.tr("settings.advanced.silence_threshold"),
+                            valueText: L10n.tr("unit.db_format", settings.silenceThresholdDB)
                         ) {
                             Stepper("", value: $settings.silenceThresholdDB, in: -70 ... -20, step: 1)
                                 .labelsHidden()
@@ -114,8 +114,8 @@ struct SettingsBehaviorCard: View {
                         }
 
                         stepperRow(
-                            title: "Silence Duration",
-                            valueText: String(format: "%.0f ms", settings.silenceDurationMs)
+                            title: L10n.tr("settings.advanced.silence_duration"),
+                            valueText: L10n.tr("unit.ms_format", settings.silenceDurationMs)
                         ) {
                             Stepper("", value: $settings.silenceDurationMs, in: 300 ... 3000, step: 100)
                                 .labelsHidden()
@@ -123,27 +123,27 @@ struct SettingsBehaviorCard: View {
                         }
 
                         stepperRow(
-                            title: "Start Guard",
-                            valueText: String(format: "%.0f ms", settings.autoStopStartGuardMs)
+                            title: L10n.tr("settings.advanced.start_guard"),
+                            valueText: L10n.tr("unit.ms_format", settings.autoStopStartGuardMs)
                         ) {
                             Stepper("", value: $settings.autoStopStartGuardMs, in: 100 ... 1200, step: 50)
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
 
-                        Toggle("Require speech before auto-stop", isOn: $settings.requireSpeechBeforeAutoStop)
+                        Toggle(L10n.tr("settings.advanced.require_speech_before_auto_stop"), isOn: $settings.requireSpeechBeforeAutoStop)
                             .font(.system(size: 12, weight: .medium))
 
                         stepperRow(
-                            title: "Speech Activate Threshold",
-                            valueText: String(format: "%.0f dB", settings.speechActivateThresholdDB)
+                            title: L10n.tr("settings.advanced.speech_activate_threshold"),
+                            valueText: L10n.tr("unit.db_format", settings.speechActivateThresholdDB)
                         ) {
                             Stepper("", value: $settings.speechActivateThresholdDB, in: -60 ... -20, step: 1)
                                 .labelsHidden()
                                 .controlSize(.small)
                         }
 
-                        Toggle("Debug Auto-stop Logs", isOn: $settings.autoStopDebugLogs)
+                        Toggle(L10n.tr("settings.advanced.debug_auto_stop_logs"), isOn: $settings.autoStopDebugLogs)
                             .font(.system(size: 12, weight: .medium))
                     }
                     .padding(.top, 6)

@@ -8,9 +8,9 @@ enum AutoPasteError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionMissing:
-            return "Auto Paste 需要在系统设置中授予辅助功能权限。"
+            return L10n.tr("error.autopaste.permission_missing")
         case .eventBuildFailed:
-            return "无法创建粘贴事件。"
+            return L10n.tr("error.autopaste.event_build_failed")
         }
     }
 }

@@ -14,7 +14,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Settings"
+        window.title = L10n.tr("settings.window.title")
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 620, height: 660))
         window.minSize = NSSize(width: 620, height: 620)

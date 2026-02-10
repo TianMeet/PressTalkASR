@@ -11,13 +11,13 @@ enum HUDAnchorPosition: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .bottomRight:
-            return "Bottom Right"
+            return L10n.tr("hud.anchor.bottom_right")
         case .bottomLeft:
-            return "Bottom Left"
+            return L10n.tr("hud.anchor.bottom_left")
         case .topRight:
-            return "Top Right"
+            return L10n.tr("hud.anchor.top_right")
         case .topLeft:
-            return "Top Left"
+            return L10n.tr("hud.anchor.top_left")
         }
     }
 }

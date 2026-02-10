@@ -72,7 +72,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("PressTalk ASR")
                         .font(.system(size: 17, weight: .semibold))
-                    Text("按住 \(settings.hotkeyShortcut.displayText) 说话，松开自动转写并复制")
+                    Text(L10n.tr("settings.header.subtitle_format", settings.hotkeyShortcut.displayText))
                         .font(.system(size: 12))
                         .foregroundStyle(UITheme.secondaryText)
                 }
@@ -109,19 +109,19 @@ struct SettingsView: View {
     private var permissionsCard: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
-                cardTitle("Permissions", "lock.shield")
+                cardTitle(L10n.tr("settings.card.permissions"), "lock.shield")
 
                 permissionRow(
-                    title: "Microphone",
+                    title: L10n.tr("settings.permission.microphone"),
                     granted: hasMicPermission,
-                    actionTitle: "Open Microphone Settings",
+                    actionTitle: L10n.tr("settings.permission.open_microphone_settings"),
                     action: { PermissionHelper.openMicrophoneSettings() }
                 )
 
                 permissionRow(
-                    title: "Accessibility",
+                    title: L10n.tr("settings.permission.accessibility"),
                     granted: hasAXPermission,
-                    actionTitle: "Open Accessibility Settings",
+                    actionTitle: L10n.tr("settings.permission.open_accessibility_settings"),
                     action: { PermissionHelper.openAccessibilitySettings() }
                 )
             }
@@ -131,14 +131,14 @@ struct SettingsView: View {
     private var costCard: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
-                cardTitle("Cost", "chart.line.uptrend.xyaxis")
+                cardTitle(L10n.tr("settings.card.cost"), "chart.line.uptrend.xyaxis")
 
-                Text("今日累计时长：\(formatDuration(costTracker.secondsToday()))")
+                Text(L10n.tr("settings.cost.today_duration_format", formatDuration(costTracker.secondsToday())))
                     .font(.system(size: 13, weight: .medium))
 
                 HStack(spacing: 10) {
-                    metricPill("mini", String(format: "$%.4f", costTracker.estimatedCostTodayMini()))
-                    metricPill("accurate", String(format: "$%.4f", costTracker.estimatedCostTodayAccurate()))
+                    metricPill(L10n.tr("settings.metric.mini"), String(format: "$%.4f", costTracker.estimatedCostTodayMini()))
+                    metricPill(L10n.tr("settings.metric.accurate"), String(format: "$%.4f", costTracker.estimatedCostTodayAccurate()))
                 }
             }
         }
@@ -147,8 +147,8 @@ struct SettingsView: View {
     private var statusCard: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 8) {
-                cardTitle("Last Status", "text.bubble")
-                Text(viewModel.lastMessage.isEmpty ? "Ready" : viewModel.lastMessage)
+                cardTitle(L10n.tr("settings.card.last_status"), "text.bubble")
+                Text(viewModel.lastMessage.isEmpty ? L10n.tr("settings.status.ready") : viewModel.lastMessage)
                     .font(.system(size: 13))
                     .foregroundStyle(UITheme.secondaryText)
                     .lineLimit(4)
@@ -249,21 +249,21 @@ struct SettingsView: View {
     private func startHotkeyCapture() {
         stopHotkeyCapture()
         isRecordingHotkey = true
-        statusMessage = "请按下新的快捷键组合…"
+        statusMessage = L10n.tr("settings.status.hotkey_capture_prompt")
 
         hotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             guard isRecordingHotkey else { return event }
 
             if event.keyCode == UInt16(kVK_Escape) {
                 stopHotkeyCapture()
-                statusMessage = "已取消快捷键录制。"
+                statusMessage = L10n.tr("settings.status.hotkey_capture_cancelled")
                 return nil
             }
 
             guard !event.isARepeat else { return nil }
 
             guard let shortcut = HotkeyShortcut.from(event: event) else {
-                statusMessage = "快捷键至少需要一个修饰键，并且不能只按修饰键。"
+                statusMessage = L10n.tr("settings.status.hotkey_invalid")
                 return nil
             }
 
