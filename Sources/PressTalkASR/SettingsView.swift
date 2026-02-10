@@ -6,6 +6,10 @@ import AppKit
 import Carbon
 
 struct SettingsView: View {
+    private enum Layout {
+        static let contentMaxWidth: CGFloat = 700
+    }
+
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var settings: AppSettings
     @ObservedObject var costTracker: CostTracker
@@ -32,6 +36,8 @@ struct SettingsView: View {
                 statusCard
             }
             .padding(16)
+            .frame(maxWidth: Layout.contentMaxWidth)
+            .frame(maxWidth: .infinity)
         }
         .onAppear {
             syncAPIKeyInputFromStorage()
