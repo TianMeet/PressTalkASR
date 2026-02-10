@@ -132,6 +132,8 @@ final class AppViewModel: ObservableObject {
         static let minimumRecordingSeconds: TimeInterval = 0.2
         /// 最大录音时长保护
         static let maximumRecordingSeconds: TimeInterval = 120
+        /// Auto-paste 前的剪贴板同步等待，避免部分应用粘贴旧值
+        static let autoPasteDelayNs: UInt64 = 60_000_000        // 60 ms
         /// 转写预览增量刷新节流间隔
         static let previewThrottleSeconds: TimeInterval = 0.08   // 80 ms
         /// 静音自动结束触发前延迟
@@ -511,7 +513,10 @@ final class AppViewModel: ObservableObject {
 
             if settings.autoPasteEnabled {
                 do {
+                    try await Task.sleep(nanoseconds: Constants.autoPasteDelayNs)
                     try clipboardService.autoPaste()
+                } catch is CancellationError {
+                    // Transcription task canceled after copy; skip auto-paste.
                 } catch {
                     popoverFeedback = .warning("已复制，自动粘贴失败")
                     logger.notice("Auto-paste failed after copy: \(error.localizedDescription, privacy: .public)")

@@ -222,6 +222,49 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         await Task.yield()
     }
 
+    func testAutoPasteWaitsBrieflyAfterCopy() async {
+        let settings = AppSettings()
+        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+        settings.autoPasteEnabled = true
+
+        let hotkeyManager = MockHotkeyManager()
+        let audioRecorder = MockAudioRecorder()
+        let clipboardService = TimedMockClipboardService()
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appvm-autopaste-delay-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+        let audioData = Data(repeating: 1, count: 2048)
+        FileManager.default.createFile(atPath: sourceURL.path, contents: audioData)
+        audioRecorder.recordingURL = sourceURL
+        audioRecorder.lastDuration = 0.6
+
+        let autoPasteExpectation = expectation(description: "auto paste called")
+        clipboardService.onAutoPaste = {
+            autoPasteExpectation.fulfill()
+        }
+
+        let viewModel = AppViewModel(
+            settings: settings,
+            costTracker: CostTracker(),
+            hotkeyManager: hotkeyManager,
+            audioRecorder: audioRecorder,
+            vadTrimmer: MockVADTrimmer(),
+            transcribeClient: MockTranscribeClient(),
+            hudPresenter: MockHUDPresenter(),
+            clipboardService: clipboardService
+        )
+
+        await viewModel.beginPushToTalk()
+        await viewModel.endPushToTalk()
+        await fulfillment(of: [autoPasteExpectation], timeout: 2.0)
+
+        guard let copyTime = clipboardService.copyTime, let pasteTime = clipboardService.pasteTime else {
+            XCTFail("Expected both copy and paste timestamps")
+            return
+        }
+        XCTAssertGreaterThanOrEqual(pasteTime - copyTime, 0.05)
+    }
+
     func testShortRecordingIsSilentlyDiscardedWithoutErrorHUD() async {
         let settings = AppSettings()
         settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
@@ -402,4 +445,19 @@ private final class MockHUDPresenter: HUDPresenting {
 private struct MockClipboardService: ClipboardManaging {
     func copyToPasteboard(_ text: String) {}
     func autoPaste() throws {}
+}
+
+private final class TimedMockClipboardService: ClipboardManaging {
+    var onAutoPaste: (() -> Void)?
+    private(set) var copyTime: TimeInterval?
+    private(set) var pasteTime: TimeInterval?
+
+    func copyToPasteboard(_ text: String) {
+        copyTime = ProcessInfo.processInfo.systemUptime
+    }
+
+    func autoPaste() throws {
+        pasteTime = ProcessInfo.processInfo.systemUptime
+        onAutoPaste?()
+    }
 }
