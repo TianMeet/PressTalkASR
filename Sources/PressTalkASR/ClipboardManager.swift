@@ -39,6 +39,7 @@ enum ClipboardManager {
         commandDown.flags = commandFlag
         vDown.flags = commandFlag
         vUp.flags = commandFlag
+        commandUp.flags = []
 
         commandDown.post(tap: .cghidEventTap)
         vDown.post(tap: .cghidEventTap)
