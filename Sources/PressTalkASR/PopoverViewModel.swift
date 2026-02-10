@@ -206,7 +206,11 @@ final class PopoverViewModel: ObservableObject {
 
         appViewModel.settings.$selectedModelRawValue
             .sink { [weak self] _ in
-                self?.refreshMetrics()
+                // Defer publish to next runloop to avoid nested publishes
+                // while another SwiftUI view tree is processing updates.
+                DispatchQueue.main.async { [weak self] in
+                    self?.refreshMetrics()
+                }
             }
             .store(in: &cancellables)
 
