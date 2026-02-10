@@ -152,15 +152,12 @@ final class AppViewModel: ObservableObject {
     private let hudPresenter: any HUDPresenting
     private let clipboardService: any ClipboardManaging
     private let transcriptionCoordinator: TranscriptionCoordinator
+    private let recordingSessionCoordinator: RecordingSessionCoordinator
     private var settingsWindowController: SettingsWindowController?
 
     private var transcribeTask: Task<Void, Never>?
     private var pendingAutoStopTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
-    private var silenceAutoStopDetector = SilenceAutoStopDetector()
-    private var recordingStartedAt: Date?
-    private var isStoppingRecording = false
-    private var hasAutoStopFiredForSession = false
     private var lastAutoStopLogTime = Date.distantPast
 
     var menuBarIconName: String {
@@ -179,7 +176,8 @@ final class AppViewModel: ObservableObject {
         vadTrimmer: any SilenceTrimming = VADTrimmer(),
         transcribeClient: any TranscriptionServicing = OpenAITranscribeClient(),
         hudPresenter: any HUDPresenting = HUDPresenter(),
-        clipboardService: any ClipboardManaging = SystemClipboardService()
+        clipboardService: any ClipboardManaging = SystemClipboardService(),
+        recordingSessionCoordinator: RecordingSessionCoordinator = RecordingSessionCoordinator()
     ) {
         self.settings = settings
         self.costTracker = costTracker
@@ -188,6 +186,7 @@ final class AppViewModel: ObservableObject {
         self.transcribeClient = transcribeClient
         self.hudPresenter = hudPresenter
         self.clipboardService = clipboardService
+        self.recordingSessionCoordinator = recordingSessionCoordinator
         self.transcriptionCoordinator = TranscriptionCoordinator(
             transcribeClient: transcribeClient,
             vadTrimmer: vadTrimmer
@@ -277,6 +276,15 @@ final class AppViewModel: ObservableObject {
         await stopAndTranscribe(trigger: .manual)
     }
 
+    private func mapStopTrigger(_ trigger: StopTrigger) -> RecordingStopTrigger {
+        switch trigger {
+        case .manual:
+            return .manual
+        case .autoSilence:
+            return .autoSilence
+        }
+    }
+
     private func transition(to phase: SessionPhase) {
         sessionPhase = phase
         isRecording = phase.isRecording
@@ -296,10 +304,7 @@ final class AppViewModel: ObservableObject {
         do {
             pendingAutoStopTask?.cancel()
             pendingAutoStopTask = nil
-            silenceAutoStopDetector = SilenceAutoStopDetector(configuration: settings.autoStopConfiguration)
-            recordingStartedAt = Date()
-            isStoppingRecording = false
-            hasAutoStopFiredForSession = false
+            recordingSessionCoordinator.beginSession(configuration: settings.autoStopConfiguration)
 
             _ = try audioRecorder.startRecording()
             transition(to: .listening)
@@ -315,17 +320,12 @@ final class AppViewModel: ObservableObject {
 
     private func stopAndTranscribe(trigger: StopTrigger) async {
         guard isRecording else { return }
-        guard !isStoppingRecording else { return }
-        if trigger == .autoSilence, hasAutoStopFiredForSession {
+        guard recordingSessionCoordinator.beginStop(trigger: mapStopTrigger(trigger)) else {
             return
         }
 
         pendingAutoStopTask?.cancel()
         pendingAutoStopTask = nil
-        isStoppingRecording = true
-        if trigger == .autoSilence {
-            hasAutoStopFiredForSession = true
-        }
 
         popoverFeedback = .none
 
@@ -333,14 +333,13 @@ final class AppViewModel: ObservableObject {
         do {
             sourceURL = try audioRecorder.stopRecording()
         } catch {
-            isStoppingRecording = false
+            recordingSessionCoordinator.abortStop()
             showError("停止录音失败：\(error.localizedDescription)")
             return
         }
 
         transition(to: .idle)
-        isStoppingRecording = false
-        recordingStartedAt = nil
+        recordingSessionCoordinator.finishStop()
 
         let recordedSeconds = audioRecorder.lastDuration
         if recordedSeconds < Constants.minimumRecordingSeconds {
@@ -368,24 +367,18 @@ final class AppViewModel: ObservableObject {
             pendingAutoStopTask = nil
             return
         }
-        guard !isStoppingRecording else { return }
         guard pendingAutoStopTask == nil else { return }
-        guard let recordingStartedAt else { return }
-
-        silenceAutoStopDetector.updateConfiguration(settings.autoStopConfiguration)
-
-        let elapsedMs = Date().timeIntervalSince(recordingStartedAt) * 1000
-        let (shouldAutoStop, debugInfo) = silenceAutoStopDetector.ingest(
-            dbInstant: sample.dbInstant,
-            frameDurationMs: sample.frameDurationMs,
-            recordingElapsedMs: elapsedMs
+        let decision = recordingSessionCoordinator.evaluateAutoStop(
+            sample: sample,
+            isEnabled: settings.enableAutoStopOnSilence,
+            configuration: settings.autoStopConfiguration
         )
 
-        if settings.autoStopDebugLogs {
+        if settings.autoStopDebugLogs, let debugInfo = decision.debugInfo {
             maybePrintAutoStopDebug(debugInfo)
         }
 
-        guard shouldAutoStop, !hasAutoStopFiredForSession else { return }
+        guard decision.shouldAutoStop else { return }
 
         pendingAutoStopTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Constants.autoStopDebounceNs)
