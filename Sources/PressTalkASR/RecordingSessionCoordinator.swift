@@ -13,13 +13,18 @@ struct AutoStopDecision {
 @MainActor
 final class RecordingSessionCoordinator {
     private var silenceAutoStopDetector = SilenceAutoStopDetector()
-    private var recordingStartedAt: Date?
+    private var recordingStartedUptime: TimeInterval?
     private var isStoppingRecording = false
     private var hasAutoStopFiredForSession = false
+    private let uptimeProvider: @Sendable () -> TimeInterval
+
+    init(uptimeProvider: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.uptimeProvider = uptimeProvider
+    }
 
     func beginSession(configuration: SilenceAutoStopDetector.Configuration) {
         silenceAutoStopDetector = SilenceAutoStopDetector(configuration: configuration)
-        recordingStartedAt = Date()
+        recordingStartedUptime = uptimeProvider()
         isStoppingRecording = false
         hasAutoStopFiredForSession = false
     }
@@ -43,7 +48,7 @@ final class RecordingSessionCoordinator {
 
     func finishStop() {
         isStoppingRecording = false
-        recordingStartedAt = nil
+        recordingStartedUptime = nil
     }
 
     func evaluateAutoStop(
@@ -57,13 +62,13 @@ final class RecordingSessionCoordinator {
         guard !isStoppingRecording else {
             return AutoStopDecision(shouldAutoStop: false, debugInfo: nil)
         }
-        guard let recordingStartedAt else {
+        guard let recordingStartedUptime else {
             return AutoStopDecision(shouldAutoStop: false, debugInfo: nil)
         }
 
         silenceAutoStopDetector.updateConfiguration(configuration)
 
-        let elapsedMs = Date().timeIntervalSince(recordingStartedAt) * 1000
+        let elapsedMs = max(0, uptimeProvider() - recordingStartedUptime) * 1000
         let (shouldAutoStop, debugInfo) = silenceAutoStopDetector.ingest(
             dbInstant: sample.dbInstant,
             frameDurationMs: sample.frameDurationMs,

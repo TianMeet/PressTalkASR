@@ -50,7 +50,7 @@ final class AudioRecorder {
     private(set) var lastDuration: TimeInterval = 0
 
     private var recorder: AVAudioRecorder?
-    private var startDate: Date?
+    private var startUptime: TimeInterval?
     private var meterTimer: DispatchSourceTimer?
     private var lastMeterTimestamp: DispatchTime?
     private var requestedMicPermissionInSession = false
@@ -139,7 +139,7 @@ final class AudioRecorder {
         }
 
         self.recorder = recorder
-        self.startDate = Date()
+        self.startUptime = ProcessInfo.processInfo.systemUptime
         self.lastDuration = 0
         startMetering()
 
@@ -152,12 +152,13 @@ final class AudioRecorder {
         recorder.stop()
         stopMetering()
 
-        let duration = max(0, Date().timeIntervalSince(startDate ?? Date()))
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        let duration = max(0, nowUptime - (startUptime ?? nowUptime))
         lastDuration = duration
 
         let url = recorder.url
         self.recorder = nil
-        self.startDate = nil
+        self.startUptime = nil
 
         return url
     }
