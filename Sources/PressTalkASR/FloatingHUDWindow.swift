@@ -182,7 +182,7 @@ final class FloatingHUDWindow {
     }
 
     private func anchorFrame(width: CGFloat, height: CGFloat) -> NSRect {
-        guard let screen = NSScreen.main else {
+        guard let screen = resolvedAnchorScreen() else {
             return NSRect(x: 0, y: 0, width: width, height: height)
         }
 
@@ -206,6 +206,28 @@ final class FloatingHUDWindow {
         }
 
         return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func resolvedAnchorScreen() -> NSScreen? {
+        // Prefer the screen where the user is currently interacting.
+        if let pointerScreen = screenContainingPointer() {
+            return pointerScreen
+        }
+        if let keyWindowScreen = NSApp.keyWindow?.screen {
+            return keyWindowScreen
+        }
+        if let mainWindowScreen = NSApp.mainWindow?.screen {
+            return mainWindowScreen
+        }
+        return NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private func screenContainingPointer() -> NSScreen? {
+        let pointerLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first { screen in
+            // Expand by 1pt so edge hits are still treated as inside.
+            screen.frame.insetBy(dx: -1, dy: -1).contains(pointerLocation)
+        }
     }
 
     private func clearWindowChromeArtifacts() {
