@@ -2,15 +2,18 @@ import Foundation
 import Carbon
 
 enum HotkeyError: LocalizedError {
+    case invalidShortcut
     case installHandlerFailed(OSStatus)
     case registerHotkeyFailed(OSStatus)
 
     var errorDescription: String? {
         switch self {
+        case .invalidShortcut:
+            return "快捷键无效：请至少包含一个修饰键。"
         case .installHandlerFailed(let status):
             return "热键处理程序安装失败（状态码：\(status)）。"
         case .registerHotkeyFailed(let status):
-            return "热键 Option+Space 注册失败（状态码：\(status)）。"
+            return "热键注册失败（状态码：\(status)）。"
         }
     }
 }
@@ -27,7 +30,10 @@ final class HotkeyManager {
         unregister()
     }
 
-    func registerDefaultHotkey() throws {
+    func registerHotkey(_ shortcut: HotkeyShortcut = .defaultPushToTalk) throws {
+        guard shortcut.isValid else {
+            throw HotkeyError.invalidShortcut
+        }
         unregister()
 
         var eventTypes = [
@@ -52,7 +58,13 @@ final class HotkeyManager {
                     &incomingID
                 )
 
-                guard status == noErr, incomingID.id == manager.hotKeyID.id else { return noErr }
+                guard
+                    status == noErr,
+                    incomingID.id == manager.hotKeyID.id,
+                    incomingID.signature == manager.hotKeyID.signature
+                else {
+                    return noErr
+                }
 
                 let kind = GetEventKind(eventRef)
                 if kind == UInt32(kEventHotKeyPressed) {
@@ -73,8 +85,8 @@ final class HotkeyManager {
         }
 
         let registerStatus = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(optionKey),
+            shortcut.keyCode,
+            shortcut.carbonModifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,

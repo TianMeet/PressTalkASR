@@ -5,11 +5,17 @@ import AppKit
 
 @MainActor
 final class PopoverViewModel: ObservableObject {
+    private enum Constants {
+        static let metricsRefreshInterval: TimeInterval = 30
+        static let permissionRefreshInterval: TimeInterval = 3
+    }
+
     enum SessionState: Equatable {
         case idle
         case recording
         case transcribing
         case success
+        case warning(String)
         case error(String)
     }
 
@@ -23,11 +29,14 @@ final class PopoverViewModel: ObservableObject {
     @Published private(set) var autoPasteEnabled: Bool = false
     @Published private(set) var isPressingPrimary = false
     @Published private(set) var showAccessibilityHint = false
+    @Published private(set) var hotkeyTokens: [String] = HotkeyShortcut.defaultPushToTalk.keycapTokens
+    @Published private(set) var hotkeyDisplayText: String = HotkeyShortcut.defaultPushToTalk.displayText
 
     private let appViewModel: AppViewModel
     private var cancellables = Set<AnyCancellable>()
     private var recordingTimer: DispatchSourceTimer?
-    private var refreshTimer: DispatchSourceTimer?
+    private var metricsTimer: DispatchSourceTimer?
+    private var permissionTimer: DispatchSourceTimer?
     private var resetTask: Task<Void, Never>?
     private var transientLock = false
 
@@ -36,13 +45,18 @@ final class PopoverViewModel: ObservableObject {
 
         bindSettings()
         bindAppState()
-        refreshMetricsAndPermissions()
-        startRefreshTimer()
+        bindLifecycleEvents()
+        refreshMetrics()
+        refreshPermissions()
+        refreshHotkeyDisplay()
+        startMetricsTimer()
+        startPermissionTimer()
     }
 
     deinit {
         recordingTimer?.cancel()
-        refreshTimer?.cancel()
+        metricsTimer?.cancel()
+        permissionTimer?.cancel()
         resetTask?.cancel()
     }
 
@@ -56,6 +70,8 @@ final class PopoverViewModel: ObservableObject {
             return PopoverStatusPillModel(text: "Transcribing", color: Color.indigo.opacity(0.86), showsDot: false, showsSpinner: true)
         case .success:
             return PopoverStatusPillModel(text: "Copied", color: Color.green.opacity(0.82), showsDot: true, showsSpinner: false)
+        case .warning(let message):
+            return PopoverStatusPillModel(text: message, color: Color.orange.opacity(0.86), showsDot: true, showsSpinner: false)
         case .error(let reason):
             return PopoverStatusPillModel(text: reason, color: Color.red.opacity(0.78), showsDot: true, showsSpinner: false)
         }
@@ -76,10 +92,12 @@ final class PopoverViewModel: ObservableObject {
             return "Recognizing…"
         case .success:
             return "Copied to clipboard"
+        case .warning:
+            return "Copied, but auto paste failed"
         case .error:
             return "No speech / Network"
         case .idle:
-            return "Press and hold Option + Space"
+            return "Press and hold \(hotkeyDisplayText)"
         }
     }
 
@@ -91,6 +109,8 @@ final class PopoverViewModel: ObservableObject {
             return Color.indigo.opacity(0.86)
         case .success:
             return Color.green.opacity(0.82)
+        case .warning:
+            return Color.orange.opacity(0.84)
         case .error:
             return Color.red.opacity(0.72)
         case .idle:
@@ -148,6 +168,7 @@ final class PopoverViewModel: ObservableObject {
     }
 
     func setAutoPasteEnabled(_ enabled: Bool) {
+        refreshPermissions()
         if enabled && autoPasteNeedsPermission {
             showAccessibilityHint = true
             appViewModel.settings.autoPasteEnabled = false
@@ -159,7 +180,7 @@ final class PopoverViewModel: ObservableObject {
 
     func openAccessibilitySettings() {
         PermissionHelper.openAccessibilitySettings()
-        refreshMetricsAndPermissions()
+        refreshPermissions()
     }
 
     func openSettings() {
@@ -185,13 +206,20 @@ final class PopoverViewModel: ObservableObject {
 
         appViewModel.settings.$selectedModelRawValue
             .sink { [weak self] _ in
-                self?.refreshMetricsAndPermissions()
+                self?.refreshMetrics()
+            }
+            .store(in: &cancellables)
+
+        appViewModel.settings.$hotkeyKeyCode
+            .combineLatest(appViewModel.settings.$hotkeyModifiers)
+            .sink { [weak self] _, _ in
+                self?.refreshHotkeyDisplay()
             }
             .store(in: &cancellables)
 
         appViewModel.costTracker.$dailySeconds
             .sink { [weak self] _ in
-                self?.refreshMetricsAndPermissions()
+                self?.refreshMetrics()
             }
             .store(in: &cancellables)
     }
@@ -207,6 +235,14 @@ final class PopoverViewModel: ObservableObject {
         appViewModel.$popoverFeedback
             .sink { [weak self] feedback in
                 self?.handleFeedback(feedback)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func bindLifecycleEvents() {
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                self?.refreshPermissions()
             }
             .store(in: &cancellables)
     }
@@ -240,12 +276,17 @@ final class PopoverViewModel: ObservableObject {
         case .success:
             transientLock = true
             setState(.success)
-            appViewModel.consumePopoverFeedback()
+            consumePopoverFeedbackDeferred()
             scheduleReset(after: 1.5)
+        case .warning(let message):
+            transientLock = true
+            setState(.warning(shortWarning(message)))
+            consumePopoverFeedbackDeferred()
+            scheduleReset(after: 2.2)
         case .error(let message):
             transientLock = true
             setState(.error(shortError(message)))
-            appViewModel.consumePopoverFeedback()
+            consumePopoverFeedbackDeferred()
             scheduleReset(after: 2.0)
         }
     }
@@ -264,7 +305,14 @@ final class PopoverViewModel: ObservableObject {
         if message.contains("未识别") || message.contains("太短") {
             return "No speech"
         }
-        return "Error"
+        return "Try again"
+    }
+
+    private func shortWarning(_ message: String) -> String {
+        if message.contains("自动粘贴") || message.lowercased().contains("paste") {
+            return "Paste failed"
+        }
+        return "Warning"
     }
 
     private func scheduleReset(after delay: TimeInterval) {
@@ -297,24 +345,49 @@ final class PopoverViewModel: ObservableObject {
         recordingElapsedSeconds = 0
     }
 
-    private func startRefreshTimer() {
+    private func startMetricsTimer() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.schedule(deadline: .now() + Constants.metricsRefreshInterval, repeating: Constants.metricsRefreshInterval)
         timer.setEventHandler { [weak self] in
-            self?.refreshMetricsAndPermissions()
+            self?.refreshMetrics()
         }
         timer.resume()
-        refreshTimer = timer
+        metricsTimer = timer
     }
 
-    private func refreshMetricsAndPermissions() {
+    private func startPermissionTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + Constants.permissionRefreshInterval, repeating: Constants.permissionRefreshInterval)
+        timer.setEventHandler { [weak self] in
+            self?.refreshPermissions()
+        }
+        timer.resume()
+        permissionTimer = timer
+    }
+
+    private func refreshMetrics() {
         todayDurationSeconds = appViewModel.costTracker.secondsToday()
         estimatedCost = appViewModel.costTracker.estimatedCostToday(for: appViewModel.settings.selectedModel)
+    }
+
+    private func refreshPermissions() {
         micPermission = PermissionHelper.microphoneStatus()
         accessibilityPermission = PermissionHelper.accessibilityStatus()
 
         if accessibilityPermission == .granted {
             showAccessibilityHint = false
+        }
+    }
+
+    private func refreshHotkeyDisplay() {
+        let shortcut = appViewModel.settings.hotkeyShortcut
+        hotkeyTokens = shortcut.keycapTokens
+        hotkeyDisplayText = shortcut.displayText
+    }
+
+    private func consumePopoverFeedbackDeferred() {
+        DispatchQueue.main.async { [weak self] in
+            self?.appViewModel.consumePopoverFeedback()
         }
     }
 }

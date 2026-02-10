@@ -8,11 +8,69 @@ private let logger = Logger(
     category: "AppViewModel"
 )
 
+private final class PreviewDeltaCoalescer: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.xingkong.PressTalkASR.preview-coalescer")
+    private let interval: TimeInterval
+    private var latest = ""
+    private var pendingWorkItem: DispatchWorkItem?
+
+    init(interval: TimeInterval) {
+        self.interval = interval
+    }
+
+    func push(_ text: String, onFlush: @escaping @Sendable (String) -> Void) {
+        queue.async {
+            self.latest = text
+            guard self.pendingWorkItem == nil else { return }
+
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                let snapshot = self.latest
+                self.latest = ""
+                self.pendingWorkItem = nil
+                guard !snapshot.isEmpty else { return }
+                onFlush(snapshot)
+            }
+
+            self.pendingWorkItem = work
+            self.queue.asyncAfter(deadline: .now() + self.interval, execute: work)
+        }
+    }
+
+    func reset() {
+        queue.async {
+            self.latest = ""
+            self.pendingWorkItem?.cancel()
+            self.pendingWorkItem = nil
+        }
+    }
+}
+
+private final class DeltaTimingProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var firstDeltaAt: Date?
+
+    func markFirstDeltaIfNeeded() {
+        lock.lock()
+        defer { lock.unlock() }
+        if firstDeltaAt == nil {
+            firstDeltaAt = Date()
+        }
+    }
+
+    func snapshot() -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return firstDeltaAt
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     enum PopoverFeedback: Equatable {
         case none
         case success(String)
+        case warning(String)
         case error(String)
     }
 
@@ -64,7 +122,14 @@ final class AppViewModel: ObservableObject {
         /// 录音最短有效时长
         static let minimumRecordingSeconds: TimeInterval = 0.2
         /// 转写预览增量刷新节流间隔
-        static let previewThrottleNs: UInt64 = 80_000_000       // 80 ms
+        static let previewThrottleSeconds: TimeInterval = 0.08   // 80 ms
+        /// 速度优先：短音频默认跳过本地 VAD Trim
+        static let trimMinDurationSecondsForUpload: TimeInterval = 1.2
+        /// 压缩格式通常上传更快，只有较长录音才尝试 trim 以避免本地预处理过慢。
+        static let trimMinDurationSecondsForCompressed: TimeInterval = 8.0
+        /// VAD trim 仅允许占用有限预算，避免拖慢 TTFT。
+        static let trimBudgetNs: UInt64 = 220_000_000 // 220 ms
+        static let compressedAudioExtensions: Set<String> = ["m4a", "mp3", "mpga", "mp4", "mpeg", "webm", "ogg", "flac"]
         /// 静音自动结束触发前延迟
         static let autoStopDebounceNs: UInt64 = 80_000_000      // 80 ms
         /// 音频文件轮询最小有效字节数
@@ -85,7 +150,6 @@ final class AppViewModel: ObservableObject {
     private let audioRecorder = AudioRecorder()
     private let vadTrimmer = VADTrimmer()
     private let transcribeClient = OpenAITranscribeClient()
-    private let realtimeTranscribeClient = RealtimeTranscribeClient()
     private let hudPresenter = HUDPresenter()
     private var settingsWindowController: SettingsWindowController?
 
@@ -97,8 +161,6 @@ final class AppViewModel: ObservableObject {
     private var isStoppingRecording = false
     private var hasAutoStopFiredForSession = false
     private var lastAutoStopLogTime = Date.distantPast
-    private var pendingPreviewText = ""
-    private var previewFlushTask: Task<Void, Never>?
 
     var menuBarIconName: String {
         if isRecording { return "mic.fill" }
@@ -114,11 +176,9 @@ final class AppViewModel: ObservableObject {
 
     init() {
         audioRecorder.onMeterSample = { [weak self] sample in
-            Task { @MainActor in
-                guard let self else { return }
-                self.hudPresenter.updateRMS(sample.rms)
-                self.processSilenceAutoStop(sample: sample)
-            }
+            guard let self else { return }
+            self.hudPresenter.updateRMS(sample.rms)
+            self.processSilenceAutoStop(sample: sample)
         }
 
         hotkeyManager.onKeyDown = { [weak self] in
@@ -148,11 +208,7 @@ final class AppViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        do {
-            try hotkeyManager.registerDefaultHotkey()
-        } catch {
-            showError(error.localizedDescription)
-        }
+        registerConfiguredHotkeyOrFallback()
     }
 
     func toggleManualRecording() async {
@@ -174,6 +230,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func consumePopoverFeedback() {
+        guard popoverFeedback != .none else { return }
         popoverFeedback = .none
     }
 
@@ -219,22 +276,14 @@ final class AppViewModel: ObservableObject {
             recordingStartedAt = Date()
             isStoppingRecording = false
             hasAutoStopFiredForSession = false
-            previewFlushTask?.cancel()
-            previewFlushTask = nil
-            pendingPreviewText = ""
 
             _ = try audioRecorder.startRecording()
             isRecording = true
             lastMessage = "Listening…"
             hudPresenter.showListening()
 
-            // 录音期间预热 TLS 连接，减少转写上传时的握手延迟
-            switch settings.transcriptionRoute {
-            case .uploadStreaming:
-                transcribeClient.prewarmConnection()
-            case .realtime:
-                realtimeTranscribeClient.prewarmConnection()
-            }
+            // 录音开始即进入短周期连接保温，降低松开后冷连接概率。
+            transcribeClient.keepWarmForInteractionWindow()
         } catch {
             showError("录音启动失败：\(error.localizedDescription)")
         }
@@ -268,19 +317,19 @@ final class AppViewModel: ObservableObject {
         isRecording = false
         isStoppingRecording = false
         recordingStartedAt = nil
-        previewFlushTask?.cancel()
-        previewFlushTask = nil
-        pendingPreviewText = ""
-        isTranscribing = true
-        lastMessage = "Transcribing…"
-        hudPresenter.showTranscribing()
 
         let recordedSeconds = audioRecorder.lastDuration
         if recordedSeconds < Constants.minimumRecordingSeconds {
-            isTranscribing = false
+            try? FileManager.default.removeItem(at: sourceURL)
             showError(WorkflowError.recordingTooShort.localizedDescription)
             return
         }
+
+        isTranscribing = true
+        lastMessage = "Transcribing…"
+        hudPresenter.showTranscribing()
+        // 停止录音后继续保温一小段时间，覆盖上传与首字阶段。
+        transcribeClient.keepWarmForInteractionWindow()
 
         transcribeTask?.cancel()
         transcribeTask = Task { [weak self] in
@@ -339,10 +388,14 @@ final class AppViewModel: ObservableObject {
     }
 
     private func runTranscription(sourceURL: URL, recordedSeconds: TimeInterval) async {
+        let transcriptionStartedAt = Date()
+        let deltaTimingProbe = DeltaTimingProbe()
+        let previewCoalescer = PreviewDeltaCoalescer(interval: Constants.previewThrottleSeconds)
         var urlsToDelete = [sourceURL]
         var requestURL = sourceURL
 
         defer {
+            previewCoalescer.reset()
             urlsToDelete.forEach { try? FileManager.default.removeItem(at: $0) }
         }
 
@@ -359,8 +412,14 @@ final class AppViewModel: ObservableObject {
                 throw WorkflowError.audioFileNotReady
             }
 
-            if settings.enableVADTrim {
-                let trimmedURL = try await vadTrimmer.trimSilence(inputURL: sourceURL)
+            let sourceExtension = sourceURL.pathExtension.lowercased()
+            let isCompressedSource = Constants.compressedAudioExtensions.contains(sourceExtension)
+            let shouldRunTrimForSpeed = settings.enableVADTrim
+                && recordedSeconds >= Constants.trimMinDurationSecondsForUpload
+                && (!isCompressedSource || recordedSeconds >= Constants.trimMinDurationSecondsForCompressed)
+
+            if shouldRunTrimForSpeed {
+                let trimmedURL = await trimSilenceBestEffort(inputURL: sourceURL)
                 if trimmedURL != sourceURL {
                     requestURL = trimmedURL
                     urlsToDelete.append(trimmedURL)
@@ -368,56 +427,32 @@ final class AppViewModel: ObservableObject {
             }
 
             let promptToSend = settings.effectivePrompt(forRecordingSeconds: recordedSeconds)
-            let text: String
-            switch settings.transcriptionRoute {
-            case .uploadStreaming:
-                text = try await transcribeClient.transcribeWithStreamingFallback(
-                    fileURL: requestURL,
-                    model: settings.selectedModel,
-                    prompt: promptToSend,
-                    languageCode: settings.preferredLanguageCode,
-                    apiKey: apiKey,
-                    onDelta: { [weak self] preview in
+            let text = try await transcribeClient.transcribe(
+                fileURL: requestURL,
+                model: settings.selectedModel,
+                prompt: promptToSend,
+                languageCode: settings.preferredLanguageCode,
+                apiKey: apiKey,
+                onDelta: { [weak self] preview in
+                    deltaTimingProbe.markFirstDeltaIfNeeded()
+                    previewCoalescer.push(preview) { latest in
                         Task { @MainActor in
-                            self?.enqueueTranscriptionPreview(preview)
+                            guard let self, self.isTranscribing else { return }
+                            self.lastMessage = latest
+                            self.hudPresenter.updateTranscribingPreview(latest)
                         }
                     }
-                )
-
-            case .realtime:
-                do {
-                    text = try await realtimeTranscribeClient.transcribe(
-                        fileURL: requestURL,
-                        model: settings.selectedModel,
-                        prompt: promptToSend,
-                        languageCode: settings.preferredLanguageCode,
-                        apiKey: apiKey,
-                        config: settings.realtimeConfiguration,
-                        onDelta: { [weak self] preview in
-                            Task { @MainActor in
-                                self?.enqueueTranscriptionPreview(preview)
-                            }
-                        }
-                    )
-                } catch {
-                    text = try await transcribeClient.transcribeWithStreamingFallback(
-                        fileURL: requestURL,
-                        model: settings.selectedModel,
-                        prompt: promptToSend,
-                        languageCode: settings.preferredLanguageCode,
-                        apiKey: apiKey,
-                        onDelta: { [weak self] preview in
-                            Task { @MainActor in
-                                self?.enqueueTranscriptionPreview(preview)
-                            }
-                        }
-                    )
                 }
-            }
+            )
 
-            previewFlushTask?.cancel()
-            previewFlushTask = nil
-            pendingPreviewText = ""
+            logTranscriptionTiming(
+                startedAt: transcriptionStartedAt,
+                firstDeltaAt: deltaTimingProbe.snapshot(),
+                endedAt: Date(),
+                recordedSeconds: recordedSeconds,
+                error: nil
+            )
+
             ClipboardManager.copyToPasteboard(text)
             lastMessage = text
             hudPresenter.showSuccess(text)
@@ -427,44 +462,92 @@ final class AppViewModel: ObservableObject {
                 do {
                     try ClipboardManager.autoPaste()
                 } catch {
-                    showError(error.localizedDescription)
-                    isTranscribing = false
-                    return
+                    popoverFeedback = .warning("已复制，自动粘贴失败")
+                    logger.notice("Auto-paste failed after copy: \(error.localizedDescription, privacy: .public)")
                 }
             }
 
             costTracker.add(seconds: recordedSeconds)
             isTranscribing = false
         } catch {
-            previewFlushTask?.cancel()
-            previewFlushTask = nil
-            pendingPreviewText = ""
+            logTranscriptionTiming(
+                startedAt: transcriptionStartedAt,
+                firstDeltaAt: deltaTimingProbe.snapshot(),
+                endedAt: Date(),
+                recordedSeconds: recordedSeconds,
+                error: error
+            )
             showError(error.localizedDescription)
             isTranscribing = false
         }
     }
 
-    private func enqueueTranscriptionPreview(_ text: String) {
-        pendingPreviewText = text
-        guard previewFlushTask == nil else { return }
+    private func logTranscriptionTiming(
+        startedAt: Date,
+        firstDeltaAt: Date?,
+        endedAt: Date,
+        recordedSeconds: TimeInterval,
+        error: Error?
+    ) {
+        let totalMs = Int(endedAt.timeIntervalSince(startedAt) * 1000)
+        let firstDeltaMs = firstDeltaAt.map { Int($0.timeIntervalSince(startedAt) * 1000) } ?? -1
+        let status = error == nil ? "ok" : "error"
+        let message = String(
+            format: "[TranscriptionTiming] status=%@ rec=%.2fs ttfd=%dms total=%dms",
+            status,
+            recordedSeconds,
+            firstDeltaMs,
+            totalMs
+        )
+        logger.notice("\(message, privacy: .public)")
+    }
 
-        previewFlushTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Constants.previewThrottleNs)
-            guard let self else { return }
-
-            let latest = self.pendingPreviewText
-            self.pendingPreviewText = ""
-            self.previewFlushTask = nil
-
-            guard self.isTranscribing else { return }
-            self.lastMessage = latest
-            self.hudPresenter.updateTranscribingPreview(latest)
+    private func trimSilenceBestEffort(inputURL: URL) async -> URL {
+        let trimmer = vadTrimmer
+        do {
+            return try await withThrowingTaskGroup(of: URL.self) { group in
+                group.addTask {
+                    try await trimmer.trimSilence(inputURL: inputURL)
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: Constants.trimBudgetNs)
+                    return inputURL
+                }
+                let chosen = try await group.next() ?? inputURL
+                group.cancelAll()
+                return chosen
+            }
+        } catch is CancellationError {
+            return inputURL
+        } catch {
+            logger.debug("VAD trim skipped: \(error.localizedDescription, privacy: .public)")
+            return inputURL
         }
     }
 
     func saveAPIKey(_ value: String) -> String {
         settings.saveAPIKey(value)
         return "API Key 已缓存到本地。"
+    }
+
+    func updateHotkeyShortcut(_ shortcut: HotkeyShortcut) -> String {
+        guard shortcut.isValid else {
+            return "快捷键无效：请至少包含一个修饰键。"
+        }
+
+        let previous = settings.hotkeyShortcut
+        do {
+            try hotkeyManager.registerHotkey(shortcut)
+            settings.hotkeyShortcut = shortcut
+            return "快捷键已更新为 \(shortcut.displayText)。"
+        } catch {
+            try? hotkeyManager.registerHotkey(previous)
+            return "快捷键更新失败：\(error.localizedDescription)"
+        }
+    }
+
+    func resetHotkeyToDefault() -> String {
+        updateHotkeyShortcut(.defaultPushToTalk)
     }
 
     func clearAPIKey() -> String {
@@ -476,5 +559,18 @@ final class AppViewModel: ObservableObject {
         lastMessage = message
         hudPresenter.showError(message)
         popoverFeedback = .error(message)
+    }
+
+    private func registerConfiguredHotkeyOrFallback() {
+        do {
+            try hotkeyManager.registerHotkey(settings.hotkeyShortcut)
+        } catch {
+            settings.hotkeyShortcut = .defaultPushToTalk
+            do {
+                try hotkeyManager.registerHotkey(.defaultPushToTalk)
+            } catch {
+                showError(error.localizedDescription)
+            }
+        }
     }
 }

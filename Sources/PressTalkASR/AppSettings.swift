@@ -3,22 +3,6 @@ import Combine
 
 @MainActor
 final class AppSettings: ObservableObject {
-    enum TranscriptionRoute: String, CaseIterable, Identifiable {
-        case uploadStreaming = "uploadStreaming"
-        case realtime = "realtime"
-
-        var id: String { rawValue }
-
-        var displayName: String {
-            switch self {
-            case .uploadStreaming:
-                return "Upload Streaming"
-            case .realtime:
-                return "Realtime"
-            }
-        }
-    }
-
     enum APIKeySource {
         case localCache
         case environment
@@ -49,15 +33,14 @@ final class AppSettings: ObservableObject {
         static let autoPasteEnabled = "autoPasteEnabled"
         static let enableVADTrim = "enableVADTrim"
         static let enableAutoStopOnSilence = "enableAutoStopOnSilence"
+        static let hotkeyKeyCode = "hotkeyKeyCode"
+        static let hotkeyModifiers = "hotkeyModifiers"
         static let silenceThresholdDB = "silenceThresholdDB"
         static let silenceDurationMs = "silenceDurationMs"
         static let autoStopStartGuardMs = "autoStopStartGuardMs"
         static let requireSpeechBeforeAutoStop = "requireSpeechBeforeAutoStop"
         static let speechActivateThresholdDB = "speechActivateThresholdDB"
         static let autoStopDebugLogs = "autoStopDebugLogs"
-        static let transcriptionRouteRawValue = "transcriptionRouteRawValue"
-        static let realtimeSilenceDurationMs = "realtimeSilenceDurationMs"
-        static let realtimePrefixPaddingMs = "realtimePrefixPaddingMs"
         static let modelRawValue = "modelRawValue"
         static let customPrompt = "customPrompt"
         static let promptEnabled = "promptEnabled"
@@ -84,6 +67,14 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(enableAutoStopOnSilence, forKey: Keys.enableAutoStopOnSilence) }
     }
 
+    @Published var hotkeyKeyCode: Int {
+        didSet { defaults.set(hotkeyKeyCode, forKey: Keys.hotkeyKeyCode) }
+    }
+
+    @Published var hotkeyModifiers: Int {
+        didSet { defaults.set(hotkeyModifiers, forKey: Keys.hotkeyModifiers) }
+    }
+
     @Published var silenceThresholdDB: Float {
         didSet { defaults.set(silenceThresholdDB, forKey: Keys.silenceThresholdDB) }
     }
@@ -106,18 +97,6 @@ final class AppSettings: ObservableObject {
 
     @Published var autoStopDebugLogs: Bool {
         didSet { defaults.set(autoStopDebugLogs, forKey: Keys.autoStopDebugLogs) }
-    }
-
-    @Published var transcriptionRouteRawValue: String {
-        didSet { defaults.set(transcriptionRouteRawValue, forKey: Keys.transcriptionRouteRawValue) }
-    }
-
-    @Published var realtimeSilenceDurationMs: Double {
-        didSet { defaults.set(realtimeSilenceDurationMs, forKey: Keys.realtimeSilenceDurationMs) }
-    }
-
-    @Published var realtimePrefixPaddingMs: Double {
-        didSet { defaults.set(realtimePrefixPaddingMs, forKey: Keys.realtimePrefixPaddingMs) }
     }
 
     @Published var selectedModelRawValue: String {
@@ -148,15 +127,14 @@ final class AppSettings: ObservableObject {
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? false
         enableVADTrim = defaults.object(forKey: Keys.enableVADTrim) as? Bool ?? true
         enableAutoStopOnSilence = defaults.object(forKey: Keys.enableAutoStopOnSilence) as? Bool ?? true
+        hotkeyKeyCode = AppSettings.intValue(defaults: defaults, key: Keys.hotkeyKeyCode, fallback: Int(HotkeyShortcut.defaultPushToTalk.keyCode))
+        hotkeyModifiers = AppSettings.intValue(defaults: defaults, key: Keys.hotkeyModifiers, fallback: Int(HotkeyShortcut.defaultPushToTalk.carbonModifiers))
         silenceThresholdDB = AppSettings.floatValue(defaults: defaults, key: Keys.silenceThresholdDB, fallback: -45)
         silenceDurationMs = AppSettings.doubleValue(defaults: defaults, key: Keys.silenceDurationMs, fallback: 1000)
         autoStopStartGuardMs = AppSettings.doubleValue(defaults: defaults, key: Keys.autoStopStartGuardMs, fallback: 300)
         requireSpeechBeforeAutoStop = defaults.object(forKey: Keys.requireSpeechBeforeAutoStop) as? Bool ?? true
         speechActivateThresholdDB = AppSettings.floatValue(defaults: defaults, key: Keys.speechActivateThresholdDB, fallback: -32)
         autoStopDebugLogs = defaults.object(forKey: Keys.autoStopDebugLogs) as? Bool ?? false
-        transcriptionRouteRawValue = defaults.string(forKey: Keys.transcriptionRouteRawValue) ?? TranscriptionRoute.uploadStreaming.rawValue
-        realtimeSilenceDurationMs = AppSettings.doubleValue(defaults: defaults, key: Keys.realtimeSilenceDurationMs, fallback: 600)
-        realtimePrefixPaddingMs = AppSettings.doubleValue(defaults: defaults, key: Keys.realtimePrefixPaddingMs, fallback: 240)
         selectedModelRawValue = defaults.string(forKey: Keys.modelRawValue) ?? OpenAIModel.gpt4oMiniTranscribe.rawValue
         customPrompt = defaults.string(forKey: Keys.customPrompt) ?? ""
         promptEnabled = defaults.object(forKey: Keys.promptEnabled) as? Bool ?? true
@@ -171,9 +149,18 @@ final class AppSettings: ObservableObject {
         set { selectedModelRawValue = newValue.rawValue }
     }
 
-    var transcriptionRoute: TranscriptionRoute {
-        get { TranscriptionRoute(rawValue: transcriptionRouteRawValue) ?? .uploadStreaming }
-        set { transcriptionRouteRawValue = newValue.rawValue }
+    var hotkeyShortcut: HotkeyShortcut {
+        get {
+            let shortcut = HotkeyShortcut(
+                keyCode: UInt32(hotkeyKeyCode),
+                carbonModifiers: UInt32(hotkeyModifiers)
+            )
+            return shortcut.isValid ? shortcut : .defaultPushToTalk
+        }
+        set {
+            hotkeyKeyCode = Int(newValue.keyCode)
+            hotkeyModifiers = Int(newValue.carbonModifiers)
+        }
     }
 
     var languageMode: LanguageMode {
@@ -236,13 +223,6 @@ final class AppSettings: ObservableObject {
         )
     }
 
-    var realtimeConfiguration: RealtimeTranscribeClient.Configuration {
-        RealtimeTranscribeClient.Configuration(
-            silenceDurationMs: Int(realtimeSilenceDurationMs),
-            prefixPaddingMs: Int(realtimePrefixPaddingMs)
-        )
-    }
-
     func saveAPIKey(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -293,5 +273,12 @@ final class AppSettings: ObservableObject {
             return fallback
         }
         return number.doubleValue
+    }
+
+    private static func intValue(defaults: UserDefaults, key: String, fallback: Int) -> Int {
+        guard let number = defaults.object(forKey: key) as? NSNumber else {
+            return fallback
+        }
+        return number.intValue
     }
 }

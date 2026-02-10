@@ -58,7 +58,7 @@ struct PopoverRootView: View {
                         }
 
                         Spacer()
-                        KeycapView(["⌥", "Space"])
+                        KeycapView(viewModel.hotkeyTokens)
                             .foregroundStyle(.white)
                     }
                     .padding(.horizontal, 12)

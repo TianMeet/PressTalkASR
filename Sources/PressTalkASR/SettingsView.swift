@@ -1,6 +1,9 @@
 import SwiftUI
+import Combine
 import ApplicationServices
 import AVFoundation
+import AppKit
+import Carbon
 
 struct SettingsView: View {
     @ObservedObject var viewModel: AppViewModel
@@ -10,14 +13,11 @@ struct SettingsView: View {
     @State private var apiKeyInput = ""
     @State private var statusMessage = ""
     @State private var showingMaskedAPIKey = false
-
-    private var hasAXPermission: Bool {
-        AXIsProcessTrusted()
-    }
-
-    private var hasMicPermission: Bool {
-        AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-    }
+    @State private var hasAXPermission = AXIsProcessTrusted()
+    @State private var hasMicPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    @State private var isRecordingHotkey = false
+    @State private var hotkeyMonitor: Any?
+    private let permissionRefreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ScrollView {
@@ -33,9 +33,19 @@ struct SettingsView: View {
         }
         .onAppear {
             syncAPIKeyInputFromStorage()
+            refreshPermissionSnapshot()
         }
         .onChange(of: settings.apiKeySourceState) { _ in
             syncAPIKeyInputFromStorage()
+        }
+        .onReceive(permissionRefreshTimer) { _ in
+            refreshPermissionSnapshot()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissionSnapshot()
+        }
+        .onDisappear {
+            stopHotkeyCapture()
         }
         .background(
             LinearGradient(
@@ -56,7 +66,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("PressTalk ASR")
                         .font(.system(size: 17, weight: .semibold))
-                    Text("按住 Option + Space 说话，松开自动转写并复制")
+                    Text("按住 \(settings.hotkeyShortcut.displayText) 说话，松开自动转写并复制")
                         .font(.system(size: 12))
                         .foregroundStyle(UITheme.secondaryText)
                 }
@@ -141,13 +151,6 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Transcription Route", selection: $settings.transcriptionRouteRawValue) {
-                    ForEach(AppSettings.TranscriptionRoute.allCases) { route in
-                        Text(route.displayName).tag(route.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-
                 Picker("Language", selection: $settings.languageModeRawValue) {
                     ForEach(AppSettings.LanguageMode.allCases) { mode in
                         Text(mode.displayName).tag(mode.rawValue)
@@ -204,30 +207,6 @@ struct SettingsView: View {
                         .foregroundStyle(UITheme.secondaryText)
                 }
 
-                DisclosureGroup("Advanced (Realtime VAD)") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        stepperRow(
-                            title: "Realtime Silence Duration",
-                            valueText: String(format: "%.0f ms", settings.realtimeSilenceDurationMs)
-                        ) {
-                            Stepper("", value: $settings.realtimeSilenceDurationMs, in: 300 ... 1500, step: 50)
-                                .labelsHidden()
-                                .controlSize(.small)
-                        }
-
-                        stepperRow(
-                            title: "Realtime Prefix Padding",
-                            valueText: String(format: "%.0f ms", settings.realtimePrefixPaddingMs)
-                        ) {
-                            Stepper("", value: $settings.realtimePrefixPaddingMs, in: 80 ... 500, step: 20)
-                                .labelsHidden()
-                                .controlSize(.small)
-                        }
-                    }
-                    .padding(.top, 6)
-                }
-                .font(.system(size: 12, weight: .semibold))
-
                 if !statusMessage.isEmpty {
                     Text(statusMessage)
                         .font(.system(size: 12, weight: .medium))
@@ -241,6 +220,48 @@ struct SettingsView: View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
                 cardTitle("Behavior", "switch.2")
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Global Hotkey")
+                            Text("用于开始/结束录音")
+                                .font(.system(size: 11))
+                                .foregroundStyle(UITheme.secondaryText)
+                        }
+
+                        Spacer()
+                        KeycapView(settings.hotkeyShortcut.keycapTokens)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button(isRecordingHotkey ? "Press Keys..." : "Record Shortcut") {
+                            if isRecordingHotkey {
+                                stopHotkeyCapture()
+                                statusMessage = "已取消快捷键录制。"
+                            } else {
+                                startHotkeyCapture()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button("Reset Default") {
+                            stopHotkeyCapture()
+                            statusMessage = viewModel.resetHotkeyToDefault()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    if isRecordingHotkey {
+                        Text("按下新的组合键（需包含 ⌘ / ⌥ / ⌃ / ⇧），按 Esc 取消。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(UITheme.secondaryText)
+                    }
+                }
+
+                Divider()
 
                 Toggle(isOn: $settings.enableVADTrim) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -473,6 +494,46 @@ struct SettingsView: View {
         } else {
             apiKeyInput = ""
             showingMaskedAPIKey = false
+        }
+    }
+
+    private func refreshPermissionSnapshot() {
+        hasMicPermission = PermissionHelper.microphoneStatus() == .granted
+        hasAXPermission = PermissionHelper.accessibilityStatus() == .granted
+    }
+
+    private func startHotkeyCapture() {
+        stopHotkeyCapture()
+        isRecordingHotkey = true
+        statusMessage = "请按下新的快捷键组合…"
+
+        hotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            guard isRecordingHotkey else { return event }
+
+            if event.keyCode == UInt16(kVK_Escape) {
+                stopHotkeyCapture()
+                statusMessage = "已取消快捷键录制。"
+                return nil
+            }
+
+            guard !event.isARepeat else { return nil }
+
+            guard let shortcut = HotkeyShortcut.from(event: event) else {
+                statusMessage = "快捷键至少需要一个修饰键，并且不能只按修饰键。"
+                return nil
+            }
+
+            statusMessage = viewModel.updateHotkeyShortcut(shortcut)
+            stopHotkeyCapture()
+            return nil
+        }
+    }
+
+    private func stopHotkeyCapture() {
+        isRecordingHotkey = false
+        if let hotkeyMonitor {
+            NSEvent.removeMonitor(hotkeyMonitor)
+            self.hotkeyMonitor = nil
         }
     }
 }

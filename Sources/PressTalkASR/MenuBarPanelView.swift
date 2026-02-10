@@ -54,9 +54,8 @@ struct MenuBarPanelView: View {
                         Text(viewModel.isRecording ? "Stop Recording" : "Start Recording")
                             .fontWeight(.semibold)
                         Spacer()
-                        Text("⌥ Space")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
+                        KeycapView(settings.hotkeyShortcut.keycapTokens)
+                            .foregroundStyle(.white.opacity(0.95))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)

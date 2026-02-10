@@ -17,6 +17,10 @@ final class HUDStateMachine: ObservableObject {
         var errorDelay: TimeInterval = 3.0
     }
 
+    private enum Animation {
+        static let dismissDuration: TimeInterval = 0.46
+    }
+
     @Published private(set) var mode: HUDMode = .hidden
     @Published private(set) var elapsedSeconds: Int = 0
     @Published private(set) var isHovering: Bool = false
@@ -64,7 +68,7 @@ final class HUDStateMachine: ObservableObject {
     func dismiss() {
         stopListeningTimer()
         cancelDismissTask()
-        withAnimation(.easeOut(duration: 0.14)) {
+        withAnimation(.timingCurve(0.22, 0.61, 0.36, 1.0, duration: Animation.dismissDuration)) {
             mode = .hidden
             transitionID = UUID()
         }

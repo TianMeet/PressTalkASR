@@ -15,6 +15,7 @@ struct VADTrimmer: Sendable {
 
     func trimSilence(inputURL: URL) async throws -> URL {
         try await Task.detached(priority: .userInitiated) { [configuration] in
+            try Task.checkCancellation()
             let inputFile = try AVAudioFile(forReading: inputURL)
             let format = inputFile.processingFormat
             let frameCount = AVAudioFrameCount(inputFile.length)
@@ -25,6 +26,7 @@ struct VADTrimmer: Sendable {
             }
 
             try inputFile.read(into: buffer)
+            try Task.checkCancellation()
 
             let totalFrames = Int(buffer.frameLength)
             guard totalFrames > 0 else { return inputURL }
@@ -36,12 +38,18 @@ struct VADTrimmer: Sendable {
                 guard let channels = buffer.floatChannelData else { return inputURL }
                 let mono = channels[0]
                 for idx in 0..<totalFrames where abs(mono[idx]) > configuration.threshold {
+                    if idx.isMultiple(of: 4096) {
+                        try Task.checkCancellation()
+                    }
                     speechStart = idx
                     break
                 }
                 if let first = speechStart {
                     for idx in stride(from: totalFrames - 1, through: first, by: -1)
                     where abs(mono[idx]) > configuration.threshold {
+                        if idx.isMultiple(of: 4096) {
+                            try Task.checkCancellation()
+                        }
                         speechEnd = idx
                         break
                     }
@@ -51,6 +59,9 @@ struct VADTrimmer: Sendable {
                 guard let channels = buffer.int16ChannelData else { return inputURL }
                 let mono = channels[0]
                 for idx in 0..<totalFrames {
+                    if idx.isMultiple(of: 4096) {
+                        try Task.checkCancellation()
+                    }
                     let normalized = abs(Float(mono[idx])) / Float(Int16.max)
                     if normalized > configuration.threshold {
                         speechStart = idx
@@ -59,6 +70,9 @@ struct VADTrimmer: Sendable {
                 }
                 if let first = speechStart {
                     for idx in stride(from: totalFrames - 1, through: first, by: -1) {
+                        if idx.isMultiple(of: 4096) {
+                            try Task.checkCancellation()
+                        }
                         let normalized = abs(Float(mono[idx])) / Float(Int16.max)
                         if normalized > configuration.threshold {
                             speechEnd = idx
@@ -87,6 +101,7 @@ struct VADTrimmer: Sendable {
             if trimmedFrames >= totalFrames {
                 return inputURL
             }
+            try Task.checkCancellation()
 
             guard let trimmedBuffer = AVAudioPCMBuffer(
                 pcmFormat: format,
@@ -137,6 +152,7 @@ struct VADTrimmer: Sendable {
                 commonFormat: format.commonFormat,
                 interleaved: format.isInterleaved
             )
+            try Task.checkCancellation()
             try outputFile.write(from: trimmedBuffer)
 
             // If the trimmed WAV is larger than the original compressed file

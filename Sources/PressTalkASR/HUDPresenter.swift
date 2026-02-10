@@ -125,13 +125,13 @@ final class HUDPresenter {
     private func preferredHeight(for mode: HUDMode) -> CGFloat {
         switch mode {
         case .listening, .transcribing:
-            return max(layout.minHeight, min(layout.maxHeight, 104))
+            return max(layout.minHeight, min(layout.maxHeight, 112))
         case .success(let text):
             let textHeight = textHeightForSuccess(text)
-            let estimated = 76 + textHeight
+            let estimated = 96 + textHeight
             return max(layout.minHeight, min(layout.maxHeight, estimated))
         case .error:
-            return max(layout.minHeight, min(layout.maxHeight, 124))
+            return max(layout.minHeight, min(layout.maxHeight, 138))
         case .hidden:
             return layout.minHeight
         }

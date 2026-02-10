@@ -1,11 +1,12 @@
 import SwiftUI
+import AppKit
 
 struct HUDLayoutConfig {
     var width: CGFloat = 380
-    var minHeight: CGFloat = 92
-    var maxHeight: CGFloat = 180
-    var horizontalInset: CGFloat = 16
-    var verticalInset: CGFloat = 12
+    var minHeight: CGFloat = 106
+    var maxHeight: CGFloat = 200
+    var horizontalInset: CGFloat = 17
+    var verticalInset: CGFloat = 17
     var cornerRadius: CGFloat = 18
     var edgePadding: CGFloat = 24
 }
@@ -21,51 +22,80 @@ struct HUDView: View {
     let onOpenSettings: () -> Void
 
     @State private var hoverVisible = false
+    @State private var frozenMode: HUDMode = .hidden
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 8) {
-                topBar
-                    .frame(height: 24)
-
-                middleFeedback
-                    .frame(height: 24)
-
-                bottomContent
-            }
-            .id(stateMachine.transitionID)
-            .transition(.opacity)
-            .padding(.horizontal, layout.horizontalInset)
-            .padding(.vertical, layout.verticalInset)
-            .frame(width: layout.width, alignment: .leading)
-            .background(HUDMaterialBackground(cornerRadius: layout.cornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.12), radius: 24, y: 10)
-
-            if hoverVisible {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(6)
-                        .background(.regularMaterial, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 8)
-                .padding(.trailing, 8)
-                .transition(.opacity)
-            }
-        }
+        card
+            .fixedSize(horizontal: true, vertical: true)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.14)) {
                 hoverVisible = hovering
             }
             stateMachine.setHovering(hovering)
         }
-        .animation(.easeOut(duration: 0.14), value: stateMachine.transitionID)
+        .onAppear {
+            if case .hidden = stateMachine.mode {
+                frozenMode = .hidden
+            } else {
+                frozenMode = stateMachine.mode
+            }
+        }
+        .onChange(of: stateMachine.mode) { newMode in
+            if case .hidden = newMode {
+                return
+            }
+            frozenMode = newMode
+        }
+    }
+
+    private var card: some View {
+        cardSurface
+            .overlay(alignment: .topTrailing) {
+                if hoverVisible {
+                    closeButton
+                        .padding(.top, 8)
+                        .padding(.trailing, 8)
+                        .transition(.opacity)
+                }
+            }
+    }
+
+    private var cardSurface: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            topBar
+            bodyContent
+            footer
+        }
+        .padding(.horizontal, layout.horizontalInset)
+        .padding(.vertical, layout.verticalInset)
+        .frame(width: layout.width, alignment: .leading)
+        .background(RoundedMaterialBackground(cornerRadius: layout.cornerRadius))
+        .clipShape(cardShape)
+        .overlay {
+            cardShape
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+        .background {
+            cardShape
+                .fill(Color.black.opacity(0.001))
+                .shadow(color: Color.black.opacity(0.20), radius: 18, y: 10)
+                .shadow(color: Color.black.opacity(0.12), radius: 4, y: 1)
+        }
+    }
+
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
+    }
+
+    private var closeButton: some View {
+        Button(action: onClose) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(6)
+                .background(.regularMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var topBar: some View {
@@ -74,69 +104,44 @@ struct HUDView: View {
                 .fill(stateColor)
                 .frame(width: 8, height: 8)
 
+            if showsInlineSpinner {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(stateColor)
+            }
+
             Text(statusTitle)
                 .font(.system(size: 13.5, weight: .semibold))
 
             Spacer(minLength: 8)
 
-            Text(trailingHint)
-                .font(.system(size: 11.5, weight: .regular))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var middleFeedback: some View {
-        switch stateMachine.mode {
-        case .listening:
-            AudioDotWaveView(levels: levelMeter.levels, color: stateColor)
-        case .transcribing:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(stateColor)
-                Text("识别中")
-                    .font(.system(size: 12, weight: .regular))
+            if !trailingHint.isEmpty {
+                Text(trailingHint)
+                    .font(.system(size: 11.5, weight: .regular))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .success, .error:
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(height: 1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 10)
-        case .hidden:
-            EmptyView()
         }
+        .frame(height: 20)
     }
 
     @ViewBuilder
-    private var bottomContent: some View {
-        switch stateMachine.mode {
+    private var bodyContent: some View {
+        switch effectiveMode {
         case .listening:
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 6) {
+                AudioDotWaveView(levels: levelMeter.levels, color: stateColor)
                 Text("松开结束并转写")
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text("\(settings.languageMode) · \(settings.modelMode)")
-                    .font(.system(size: 11.5, weight: .regular))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
             }
         case .transcribing(let preview):
             if preview.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(settings.autoPasteEnabled ? "识别中…（将自动复制并粘贴）" : "识别中…（将自动复制）")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text("\(settings.languageMode) · \(settings.modelMode)")
-                        .font(.system(size: 11.5, weight: .regular))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
+                Text("语音处理中，请稍候…")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             } else {
                 Text(preview)
                     .font(.system(size: 13, weight: .regular))
@@ -182,27 +187,37 @@ struct HUDView: View {
         }
     }
 
+    @ViewBuilder
+    private var footer: some View {
+        if !footerText.isEmpty {
+            Text(footerText)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+    }
+
     private var statusTitle: String {
-        switch stateMachine.mode {
+        switch effectiveMode {
         case .listening:
             return "Listening"
         case .transcribing:
             return "Transcribing"
         case .success:
-            return "Success"
+            return "Done"
         case .error:
-            return "Error"
+            return "Try Again"
         case .hidden:
             return ""
         }
     }
 
     private var trailingHint: String {
-        switch stateMachine.mode {
+        switch effectiveMode {
         case .listening:
             return stateMachine.elapsedTimeText
         case .transcribing:
-            return "松开完成"
+            return settings.autoPasteEnabled ? "将自动复制并粘贴" : "将自动复制"
         case .success:
             return settings.autoPasteEnabled ? "已复制并粘贴" : "已复制"
         case .error:
@@ -212,8 +227,24 @@ struct HUDView: View {
         }
     }
 
+    private var footerText: String {
+        switch effectiveMode {
+        case .hidden:
+            return ""
+        default:
+            return "\(settings.languageMode) · \(settings.modelMode)"
+        }
+    }
+
+    private var showsInlineSpinner: Bool {
+        if case .transcribing = effectiveMode {
+            return true
+        }
+        return false
+    }
+
     private var stateColor: Color {
-        switch stateMachine.mode {
+        switch effectiveMode {
         case .listening:
             return Color(red: 0.231, green: 0.510, blue: 0.965)
         case .transcribing:
@@ -225,6 +256,13 @@ struct HUDView: View {
         case .hidden:
             return .secondary
         }
+    }
+
+    private var effectiveMode: HUDMode {
+        if case .hidden = stateMachine.mode {
+            return frozenMode
+        }
+        return stateMachine.mode
     }
 }
 
@@ -281,22 +319,74 @@ private struct AudioDotWaveView: View {
     }
 }
 
-private struct HUDMaterialBackground: NSViewRepresentable {
+private struct RoundedMaterialBackground: NSViewRepresentable {
     let cornerRadius: CGFloat
 
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.state = .active
-        view.material = .hudWindow
-        view.blendingMode = .withinWindow
-        view.wantsLayer = true
-        view.layer?.cornerRadius = cornerRadius
-        view.layer?.masksToBounds = true
-        return view
+    func makeNSView(context: Context) -> RoundedMaterialContainerView {
+        RoundedMaterialContainerView(cornerRadius: cornerRadius)
     }
 
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = .hudWindow
-        nsView.layer?.cornerRadius = cornerRadius
+    func updateNSView(_ nsView: RoundedMaterialContainerView, context: Context) {
+        nsView.updateCornerRadius(cornerRadius)
+    }
+}
+
+private final class RoundedMaterialContainerView: NSView {
+    private let effectView = NSVisualEffectView()
+    private let maskLayer = CAShapeLayer()
+    private var cornerRadius: CGFloat
+
+    init(cornerRadius: CGFloat) {
+        self.cornerRadius = cornerRadius
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.masksToBounds = false
+
+        effectView.state = .active
+        effectView.material = .hudWindow
+        effectView.blendingMode = .withinWindow
+        effectView.wantsLayer = true
+        effectView.layer?.backgroundColor = NSColor.clear.cgColor
+        effectView.layer?.masksToBounds = true
+        effectView.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(effectView)
+        NSLayoutConstraint.activate([
+            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            effectView.topAnchor.constraint(equalTo: topAnchor),
+            effectView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isOpaque: Bool { false }
+
+    override func layout() {
+        super.layout()
+        applyMask()
+    }
+
+    func updateCornerRadius(_ newValue: CGFloat) {
+        guard abs(newValue - cornerRadius) > 0.001 else { return }
+        cornerRadius = newValue
+        needsLayout = true
+    }
+
+    private func applyMask() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let path = CGPath(
+            roundedRect: bounds,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+        maskLayer.path = path
+        effectView.layer?.mask = maskLayer
     }
 }

@@ -69,7 +69,103 @@ enum OpenAITranscribeError: LocalizedError {
     }
 }
 
+private final class PrewarmGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let minInterval: TimeInterval
+    private var lastStartAt: Date = .distantPast
+    private var inFlight = false
+
+    init(minInterval: TimeInterval) {
+        self.minInterval = minInterval
+    }
+
+    func beginIfNeeded() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let now = Date()
+        guard !inFlight else { return false }
+        guard now.timeIntervalSince(lastStartAt) >= minInterval else { return false }
+        inFlight = true
+        lastStartAt = now
+        return true
+    }
+
+    func finish() {
+        lock.lock()
+        inFlight = false
+        lock.unlock()
+    }
+}
+
+private final class KeepWarmController: @unchecked Sendable {
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "com.xingkong.PressTalkASR.keep-warm")
+    private var timer: DispatchSourceTimer?
+    private var keepWarmUntil: Date = .distantPast
+
+    deinit {
+        cancelTimer()
+    }
+
+    func extendWindow(
+        by seconds: TimeInterval,
+        tickInterval: TimeInterval,
+        onTick: @escaping @Sendable () -> Void
+    ) {
+        var timerToResume: DispatchSourceTimer?
+
+        lock.lock()
+        let deadline = Date().addingTimeInterval(seconds)
+        if deadline > keepWarmUntil {
+            keepWarmUntil = deadline
+        }
+        if timer == nil {
+            let newTimer = DispatchSource.makeTimerSource(queue: queue)
+            newTimer.schedule(deadline: .now() + tickInterval, repeating: tickInterval)
+            newTimer.setEventHandler { [weak self] in
+                guard let self else { return }
+                if self.isExpired() {
+                    self.cancelTimer()
+                    return
+                }
+                onTick()
+            }
+            timer = newTimer
+            timerToResume = newTimer
+        }
+        lock.unlock()
+
+        timerToResume?.resume()
+    }
+
+    private func isExpired() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return Date() >= keepWarmUntil
+    }
+
+    private func cancelTimer() {
+        lock.lock()
+        let existing = timer
+        timer = nil
+        lock.unlock()
+        existing?.cancel()
+    }
+}
+
 struct OpenAITranscribeClient {
+    private struct MultipartStaticSections {
+        let preamble: Data
+        let epilogue: Data
+        let contentLength: Int64
+    }
+
+    private struct StreamingMultipartRequest {
+        let request: URLRequest
+        let writerTask: Task<Void, Error>
+    }
+
     private enum Constants {
         /// OpenAI API 文件上传大小上限
         static let maxFileSizeBytes = 25 * 1024 * 1024       // 25 MB
@@ -77,32 +173,53 @@ struct OpenAITranscribeClient {
         static let resourceTimeoutInterval: TimeInterval = 60
         static let maxRetryAttempts = 3
         static let initialRetryDelayNs: UInt64 = 400_000_000 // 400 ms
+        static let prewarmMinInterval: TimeInterval = 7
+        static let keepWarmWindowSeconds: TimeInterval = 40
+        static let keepWarmTickIntervalSeconds: TimeInterval = 8
+        static let boundStreamBufferBytes = 256 * 1024
+        static let fileReadChunkBytes = 256 * 1024
+        static let streamBackpressureSleepSeconds: TimeInterval = 0.002
+        static let streamStallTimeoutSeconds: TimeInterval = 8
     }
 
     private let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
     private let session: URLSession
+    private let prewarmGate = PrewarmGate(minInterval: Constants.prewarmMinInterval)
+    private let keepWarmController = KeepWarmController()
 
     init() {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = Constants.requestTimeoutInterval
         configuration.timeoutIntervalForResource = Constants.resourceTimeoutInterval
         configuration.waitsForConnectivity = true
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.httpShouldUsePipelining = true
         session = URLSession(configuration: configuration)
     }
 
     /// 预热到 OpenAI 的 TLS 连接，录音期间提前握手以减少上传延迟。
     func prewarmConnection() {
-        let session = self.session
-        let endpoint = self.endpoint
-        Task.detached(priority: .utility) {
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "HEAD"
-            request.timeoutInterval = 5
-            _ = try? await session.data(for: request)
+        schedulePrewarmPingIfNeeded()
+    }
+
+    /// 连接保温：立即预热一次，并在短窗口内按固定间隔补充预热，降低冷连接概率。
+    func keepWarmForInteractionWindow() {
+        schedulePrewarmPingIfNeeded()
+        keepWarmController.extendWindow(
+            by: Constants.keepWarmWindowSeconds,
+            tickInterval: Constants.keepWarmTickIntervalSeconds
+        ) { [session, endpoint, prewarmGate] in
+            OpenAITranscribeClient.schedulePrewarmPing(
+                session: session,
+                endpoint: endpoint,
+                prewarmGate: prewarmGate
+            )
         }
     }
 
-    func transcribeWithStreamingFallback(
+    /// 默认先走 streaming，遇到可恢复错误自动回退到非流式请求。
+    func transcribe(
         fileURL: URL,
         model: OpenAIModel,
         prompt: String?,
@@ -123,7 +240,7 @@ struct OpenAITranscribeClient {
             // Only fall back to non-streaming for recoverable errors
             // (e.g. streaming not supported). Terminal errors (401, file too
             // large, empty) are re-thrown immediately to avoid a wasted request.
-            return try await transcribe(
+            return try await transcribeNonStreaming(
                 fileURL: fileURL,
                 model: model,
                 prompt: prompt,
@@ -133,7 +250,7 @@ struct OpenAITranscribeClient {
         }
     }
 
-    func transcribe(
+    private func transcribeNonStreaming(
         fileURL: URL,
         model: OpenAIModel,
         prompt: String?,
@@ -145,35 +262,30 @@ struct OpenAITranscribeClient {
             throw OpenAITranscribeError.fileTooLarge
         }
 
-        let boundary = "Boundary-\(UUID().uuidString)"
-        let body = try makeBody(
-            fileURL: fileURL,
-            boundary: boundary,
-            model: model,
-            prompt: prompt,
-            languageCode: languageCode,
-            streaming: false
-        )
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-
         var retryDelay = Constants.initialRetryDelayNs
         for attempt in 0..<Constants.maxRetryAttempts {
             do {
-                return try await performRequest(request)
+                let multipart = try makeStreamingMultipartRequest(
+                    fileURL: fileURL,
+                    model: model,
+                    prompt: prompt,
+                    languageCode: languageCode,
+                    streaming: false,
+                    apiKey: apiKey
+                )
+                return try await performDataRequest(
+                    request: multipart.request,
+                    writerTask: multipart.writerTask
+                )
             } catch let error as OpenAITranscribeError {
                 let shouldRetry = shouldRetry(error: error)
-                if !shouldRetry || attempt == 2 {
+                if !shouldRetry || attempt == Constants.maxRetryAttempts - 1 {
                     throw error
                 }
                 try await Task.sleep(nanoseconds: retryDelay)
                 retryDelay *= 2
             } catch {
-                if attempt == 2 { throw error }
+                if attempt == Constants.maxRetryAttempts - 1 { throw error }
                 try await Task.sleep(nanoseconds: retryDelay)
                 retryDelay *= 2
             }
@@ -182,7 +294,7 @@ struct OpenAITranscribeClient {
         throw OpenAITranscribeError.invalidResponse
     }
 
-    func transcribeStreaming(
+    private func transcribeStreaming(
         fileURL: URL,
         model: OpenAIModel,
         prompt: String?,
@@ -194,25 +306,18 @@ struct OpenAITranscribeClient {
         if fileSize > Constants.maxFileSizeBytes {
             throw OpenAITranscribeError.fileTooLarge
         }
-
-        let boundary = "Boundary-\(UUID().uuidString)"
-        let body = try makeBody(
+        let multipart = try makeStreamingMultipartRequest(
             fileURL: fileURL,
-            boundary: boundary,
             model: model,
             prompt: prompt,
             languageCode: languageCode,
-            streaming: true
+            streaming: true,
+            apiKey: apiKey
         )
 
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await session.bytes(for: multipart.request)
+            try await awaitWriterCompletion(multipart.writerTask)
             guard let http = response as? HTTPURLResponse else {
                 throw OpenAITranscribeError.invalidResponse
             }
@@ -267,18 +372,23 @@ struct OpenAITranscribeClient {
             }
             throw OpenAITranscribeError.emptyText
         } catch let error as URLError {
+            multipart.writerTask.cancel()
             switch error.code {
             case .timedOut:
                 throw OpenAITranscribeError.timeout
             default:
                 throw OpenAITranscribeError.network(error.localizedDescription)
             }
+        } catch {
+            multipart.writerTask.cancel()
+            throw error
         }
     }
 
-    private func performRequest(_ request: URLRequest) async throws -> String {
+    private func performDataRequest(request: URLRequest, writerTask: Task<Void, Error>) async throws -> String {
         do {
             let (data, response) = try await session.data(for: request)
+            try await awaitWriterCompletion(writerTask)
             guard let http = response as? HTTPURLResponse else {
                 throw OpenAITranscribeError.invalidResponse
             }
@@ -303,13 +413,27 @@ struct OpenAITranscribeClient {
                 throw OpenAITranscribeError.server(status: http.statusCode, message: message)
             }
         } catch let error as URLError {
+            writerTask.cancel()
             switch error.code {
             case .timedOut:
                 throw OpenAITranscribeError.timeout
             default:
                 throw OpenAITranscribeError.network(error.localizedDescription)
             }
+        } catch {
+            writerTask.cancel()
+            throw error
         }
+    }
+
+    private func makeBaseRequest(apiKey: String, boundary: String, contentLength: Int64) -> URLRequest {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(String(contentLength), forHTTPHeaderField: "Content-Length")
+        request.networkServiceType = .responsiveData
+        return request
     }
 
     private func shouldRetry(error: OpenAITranscribeError) -> Bool {
@@ -340,53 +464,190 @@ struct OpenAITranscribeClient {
         return nil
     }
 
-    private func makeBody(
+    private func makeStreamingMultipartRequest(
+        fileURL: URL,
+        model: OpenAIModel,
+        prompt: String?,
+        languageCode: String?,
+        streaming: Bool,
+        apiKey: String
+    ) throws -> StreamingMultipartRequest {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let sections = try makeMultipartStaticSections(
+            fileURL: fileURL,
+            boundary: boundary,
+            model: model,
+            prompt: prompt,
+            languageCode: languageCode,
+            streaming: streaming
+        )
+        var request = makeBaseRequest(
+            apiKey: apiKey,
+            boundary: boundary,
+            contentLength: sections.contentLength
+        )
+
+        let (input, output) = createBoundPairStreams(bufferSize: Constants.boundStreamBufferBytes)
+        request.httpBodyStream = input
+        if streaming {
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        }
+
+        let writerTask = Task.detached(priority: .userInitiated) {
+            try self.streamMultipartBody(
+                preamble: sections.preamble,
+                fileURL: fileURL,
+                epilogue: sections.epilogue,
+                outputStream: output
+            )
+        }
+
+        return StreamingMultipartRequest(request: request, writerTask: writerTask)
+    }
+
+    private func makeMultipartStaticSections(
         fileURL: URL,
         boundary: String,
         model: OpenAIModel,
         prompt: String?,
         languageCode: String?,
         streaming: Bool
-    ) throws -> Data {
-        let fileData = try Data(contentsOf: fileURL)
+    ) throws -> MultipartStaticSections {
         let filename = fileURL.lastPathComponent
         let mimeType = mimeType(for: fileURL.pathExtension.lowercased())
-
-        var data = Data()
-        data.appendUTF8("--\(boundary)\r\n")
-        data.appendUTF8("Content-Disposition: form-data; name=\"model\"\r\n\r\n")
-        data.appendUTF8("\(model.rawValue)\r\n")
-
-        data.appendUTF8("--\(boundary)\r\n")
-        data.appendUTF8("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
-        data.appendUTF8("\(streaming ? "json" : "text")\r\n")
-
+        var preamble = Data()
+        preamble.append(formField(name: "model", value: model.rawValue, boundary: boundary))
+        preamble.append(formField(name: "response_format", value: streaming ? "json" : "text", boundary: boundary))
         if streaming {
-            data.appendUTF8("--\(boundary)\r\n")
-            data.appendUTF8("Content-Disposition: form-data; name=\"stream\"\r\n\r\n")
-            data.appendUTF8("true\r\n")
+            preamble.append(formField(name: "stream", value: "true", boundary: boundary))
         }
-
         if let languageCode, !languageCode.isEmpty {
-            data.appendUTF8("--\(boundary)\r\n")
-            data.appendUTF8("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
-            data.appendUTF8("\(languageCode)\r\n")
+            preamble.append(formField(name: "language", value: languageCode, boundary: boundary))
         }
-
         if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            data.appendUTF8("--\(boundary)\r\n")
-            data.appendUTF8("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
-            data.appendUTF8("\(prompt)\r\n")
+            preamble.append(formField(name: "prompt", value: prompt, boundary: boundary))
+        }
+        preamble.append(Data("--\(boundary)\r\n".utf8))
+        preamble.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8))
+        preamble.append(Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
+
+        let epilogue = Data("\r\n--\(boundary)--\r\n".utf8)
+        let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        let contentLength = Int64(preamble.count) + Int64(fileSize) + Int64(epilogue.count)
+        return MultipartStaticSections(
+            preamble: preamble,
+            epilogue: epilogue,
+            contentLength: contentLength
+        )
+    }
+
+    private func formField(name: String, value: String, boundary: String) -> Data {
+        var data = Data()
+        data.append(Data("--\(boundary)\r\n".utf8))
+        data.append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+        data.append(Data("\(value)\r\n".utf8))
+        return data
+    }
+
+    private func createBoundPairStreams(bufferSize: Int) -> (InputStream, OutputStream) {
+        var readRef: Unmanaged<CFReadStream>?
+        var writeRef: Unmanaged<CFWriteStream>?
+        CFStreamCreateBoundPair(nil, &readRef, &writeRef, bufferSize)
+        let input = readRef!.takeRetainedValue() as InputStream
+        let output = writeRef!.takeRetainedValue() as OutputStream
+        return (input, output)
+    }
+
+    private func streamMultipartBody(
+        preamble: Data,
+        fileURL: URL,
+        epilogue: Data,
+        outputStream: OutputStream
+    ) throws {
+        outputStream.open()
+        defer { outputStream.close() }
+
+        try writeToStream(outputStream, data: preamble)
+
+        let fileHandle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? fileHandle.close() }
+
+        while true {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
+
+            let chunk = try fileHandle.read(upToCount: Constants.fileReadChunkBytes) ?? Data()
+            if chunk.isEmpty {
+                break
+            }
+            try writeToStream(outputStream, data: chunk)
         }
 
-        data.appendUTF8("--\(boundary)\r\n")
-        data.appendUTF8("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
-        data.appendUTF8("Content-Type: \(mimeType)\r\n\r\n")
-        data.append(fileData)
-        data.appendUTF8("\r\n")
-        data.appendUTF8("--\(boundary)--\r\n")
+        try writeToStream(outputStream, data: epilogue)
+    }
 
-        return data
+    private func writeToStream(_ stream: OutputStream, data: Data) throws {
+        if data.isEmpty { return }
+
+        try data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+            var written = 0
+            var stalledAt: Date?
+            while written < data.count {
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
+
+                if !stream.hasSpaceAvailable {
+                    if let streamError = stream.streamError {
+                        throw OpenAITranscribeError.network("写入上传流失败：\(streamError.localizedDescription)")
+                    }
+                    if stream.streamStatus == .closed || stream.streamStatus == .error {
+                        throw OpenAITranscribeError.network("上传流已关闭。")
+                    }
+                    if stalledAt == nil { stalledAt = Date() }
+                    if let stalledAt, Date().timeIntervalSince(stalledAt) > Constants.streamStallTimeoutSeconds {
+                        throw OpenAITranscribeError.network("上传写入等待超时。")
+                    }
+                    Thread.sleep(forTimeInterval: Constants.streamBackpressureSleepSeconds)
+                    continue
+                }
+
+                let count = stream.write(baseAddress.advanced(by: written), maxLength: data.count - written)
+                if count > 0 {
+                    written += count
+                    stalledAt = nil
+                    continue
+                }
+                if count < 0 {
+                    let message = stream.streamError?.localizedDescription ?? "Unknown stream write error"
+                    throw OpenAITranscribeError.network("写入上传流失败：\(message)")
+                }
+
+                if stream.streamStatus == .atEnd || stream.streamStatus == .closed || stream.streamStatus == .error {
+                    throw OpenAITranscribeError.network("上传流提前结束。")
+                }
+
+                if stalledAt == nil { stalledAt = Date() }
+                if let stalledAt, Date().timeIntervalSince(stalledAt) > Constants.streamStallTimeoutSeconds {
+                    throw OpenAITranscribeError.network("上传写入等待超时。")
+                }
+                Thread.sleep(forTimeInterval: Constants.streamBackpressureSleepSeconds)
+            }
+        }
+    }
+
+    private func awaitWriterCompletion(_ writerTask: Task<Void, Error>) async throws {
+        do {
+            try await writerTask.value
+        } catch is CancellationError {
+            throw OpenAITranscribeError.network("上传被取消。")
+        } catch let error as OpenAITranscribeError {
+            throw error
+        } catch {
+            throw OpenAITranscribeError.network("上传流写入失败：\(error.localizedDescription)")
+        }
     }
 
     private func mimeType(for ext: String) -> String {
@@ -496,10 +757,27 @@ struct OpenAITranscribeClient {
         }
         return data
     }
-}
 
-private extension Data {
-    mutating func appendUTF8(_ text: String) {
-        append(Data(text.utf8))
+    private func schedulePrewarmPingIfNeeded() {
+        OpenAITranscribeClient.schedulePrewarmPing(
+            session: session,
+            endpoint: endpoint,
+            prewarmGate: prewarmGate
+        )
+    }
+
+    private static func schedulePrewarmPing(
+        session: URLSession,
+        endpoint: URL,
+        prewarmGate: PrewarmGate
+    ) {
+        guard prewarmGate.beginIfNeeded() else { return }
+        Task.detached(priority: .utility) {
+            defer { prewarmGate.finish() }
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "HEAD"
+            request.timeoutInterval = 5
+            _ = try? await session.data(for: request)
+        }
     }
 }

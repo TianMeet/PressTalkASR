@@ -13,9 +13,7 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
 - Menu Bar App（`MenuBarExtra`）+ 原生 Popover 主面板
 - 全局热键按住说话（按下开始、松开结束）
 - 右下角 HUD 悬浮反馈（Listening / Transcribing / Success / Error）
-- OpenAI 转写双路线：
-  - Upload Streaming（文件上传 + 增量显示 + 自动回退）
-  - Realtime（WebSocket 模式）
+- OpenAI Upload Streaming 转写（文件上传 + 增量显示 + 自动回退）
 - VAD 头尾静音裁剪（上传前减小体积、减少等待）
 - 静音自动结束（Auto Stop on Silence）
 - 每日时长与费用估算
@@ -38,7 +36,6 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
   - `VADTrimmer`：头尾静音裁剪
 - 云端转写层
   - `OpenAITranscribeClient`：文件转写（支持 streaming + fallback）
-  - `RealtimeTranscribeClient`：Realtime WebSocket 转写
 - 平台能力层
   - `HotkeyManager`：全局热键
   - `ClipboardManager`：复制/自动粘贴
@@ -50,25 +47,15 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
 - `AppViewModel` 统一收敛“手动 stop”和“静音 auto-stop”，确保同一会话只 stop 一次。
 - Transcribing 阶段支持增量文本（delta）节流刷新 HUD，再以 done/最终文本覆盖。
 
-## 转写路线设计
+## 转写策略
 
-### 路线 A：Upload Streaming（默认）
+### Upload Streaming（默认）
 
 - 松开后上传音频文件到 `/v1/audio/transcriptions`
 - 请求 `stream=true`，增量展示转写文本
 - streaming 不可用或失败时，自动回退到非流式一次性转写
 
 适合：改造成本低、兼容性高、体感明显提速。
-
-### 路线 B：Realtime（可选）
-
-- 使用 `wss://api.openai.com/v1/realtime?intent=transcription`
-- 发送 `session.update`（含 `server_vad` 参数）
-- 按块 append 音频并接收 delta/done
-
-适合：需要更快出字和更强“实时感”的场景。
-
-说明：当前实现是“录音结束后将音频推送到 Realtime 通道转写”，不是边录边推流。如需“真正 ongoing recording 实时字幕”，可后续切换到 `AVAudioEngine` 实时采集管线。
 
 ## 音频与性能策略
 
@@ -83,14 +70,12 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
 - API & Model
   - API Key（本地缓存）
   - 模型：`gpt-4o-mini-transcribe` / `gpt-4o-transcribe`
-  - 转写路线：Upload Streaming / Realtime
   - Language：Auto / 中文 / English
   - Prompt（可配置最短时长门槛后发送）
 - Behavior
   - Enable VAD Trim
   - Auto Paste
   - Auto Stop on Silence + 高级阈值
-  - Realtime VAD 高级参数（silence duration / prefix padding）
 - Permissions
   - Microphone / Accessibility 状态与跳转
 - Cost
@@ -107,7 +92,6 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
   - `Sources/PressTalkASR/AppSettings.swift`
 - 转写与网络
   - `Sources/PressTalkASR/OpenAITranscribeClient.swift`
-  - `Sources/PressTalkASR/RealtimeTranscribeClient.swift`
 - 音频处理
   - `Sources/PressTalkASR/AudioRecorder.swift`
   - `Sources/PressTalkASR/VADTrimmer.swift`
@@ -183,4 +167,3 @@ swift run PressTalkASR
 - 端到端追踪与指标看板（TTFT/TTD 可视化）
 - 分段上传（超长录音、25MB 风险前置）
 - Prompt 模板管理与术语词典版本化
-
