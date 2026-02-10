@@ -96,7 +96,7 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         transcribeClient.resume(with: "ok")
     }
 
-    func testHotkeyDownDuringTranscribingShowsBusyHint() async {
+    func testHotkeyDownDuringTranscribingCancelsCurrentTranscription() async {
         let settings = AppSettings()
         settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
 
@@ -141,10 +141,16 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         await Task.yield()
         await Task.yield()
 
-        XCTAssertTrue(hudPresenter.transcribingPreviews.contains("正在转写中，请稍候…"))
-        XCTAssertGreaterThanOrEqual(hudPresenter.showTranscribingCallCount, 2)
+        XCTAssertEqual(viewModel.sessionPhase, .idle)
+        XCTAssertFalse(viewModel.isTranscribing)
+        XCTAssertEqual(viewModel.lastMessage, "")
+        XCTAssertEqual(viewModel.popoverFeedback, .none)
+        XCTAssertEqual(hudPresenter.dismissCallCount, 1)
+        XCTAssertTrue(hudPresenter.showErrorReasons.isEmpty)
 
-        transcribeClient.resume(with: "ok")
+        // Resume blocked continuation to let canceled task unwind cleanly.
+        transcribeClient.resume(with: "late result")
+        await Task.yield()
     }
 
     func testShortRecordingIsSilentlyDiscardedWithoutErrorHUD() async {

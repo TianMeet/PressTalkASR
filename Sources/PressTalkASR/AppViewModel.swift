@@ -135,8 +135,6 @@ final class AppViewModel: ObservableObject {
         static let autoStopDebounceNs: UInt64 = 80_000_000      // 80 ms
         /// Debug 日志最小输出间隔
         static let debugLogMinInterval: TimeInterval = 0.15
-        /// 转写中再次按下快捷键时的提示
-        static let transcribingBusyHint = "正在转写中，请稍候…"
     }
 
     @Published private(set) var sessionPhase: SessionPhase = .idle
@@ -158,6 +156,7 @@ final class AppViewModel: ObservableObject {
     private var settingsWindowController: SettingsWindowController?
 
     private var transcribeTask: Task<Void, Never>?
+    private var activeTranscriptionToken: UUID?
     private var pendingAutoStopTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private var lastAutoStopLogTime = Date.distantPast
@@ -272,8 +271,7 @@ final class AppViewModel: ObservableObject {
 
     private func handleHotkeyDown() async {
         if isTranscribing {
-            hudPresenter.showTranscribing()
-            hudPresenter.updateTranscribingPreview(Constants.transcribingBusyHint)
+            cancelActiveTranscription()
             return
         }
 
@@ -366,8 +364,14 @@ final class AppViewModel: ObservableObject {
         transcribeClient.keepWarmForInteractionWindow()
 
         transcribeTask?.cancel()
+        let transcriptionToken = UUID()
+        activeTranscriptionToken = transcriptionToken
         transcribeTask = Task { [weak self] in
-            await self?.runTranscription(sourceURL: sourceURL, recordedSeconds: recordedSeconds)
+            await self?.runTranscription(
+                sourceURL: sourceURL,
+                recordedSeconds: recordedSeconds,
+                token: transcriptionToken
+            )
         }
     }
 
@@ -415,13 +419,17 @@ final class AppViewModel: ObservableObject {
         logger.debug("\(message, privacy: .public)")
     }
 
-    private func runTranscription(sourceURL: URL, recordedSeconds: TimeInterval) async {
+    private func runTranscription(sourceURL: URL, recordedSeconds: TimeInterval, token: UUID) async {
         let transcriptionStartedAt = Date()
         let deltaTimingProbe = DeltaTimingProbe()
         let previewCoalescer = PreviewDeltaCoalescer(interval: Constants.previewThrottleSeconds)
 
         defer {
             previewCoalescer.reset()
+            if activeTranscriptionToken == token {
+                activeTranscriptionToken = nil
+                transcribeTask = nil
+            }
         }
 
         do {
@@ -462,6 +470,7 @@ final class AppViewModel: ObservableObject {
                 error: nil
             )
 
+            guard activeTranscriptionToken == token, isTranscribing else { return }
             clipboardService.copyToPasteboard(text)
             lastMessage = text
             hudPresenter.showSuccess(text)
@@ -486,9 +495,27 @@ final class AppViewModel: ObservableObject {
                 recordedSeconds: recordedSeconds,
                 error: error
             )
+            guard activeTranscriptionToken == token else { return }
+            if Task.isCancelled {
+                transition(to: .idle)
+                lastMessage = ""
+                hudPresenter.dismiss()
+                return
+            }
             showError(error.localizedDescription)
             transition(to: .idle)
         }
+    }
+
+    private func cancelActiveTranscription() {
+        guard isTranscribing else { return }
+        transcribeTask?.cancel()
+        transcribeTask = nil
+        activeTranscriptionToken = nil
+        popoverFeedback = .none
+        transition(to: .idle)
+        lastMessage = ""
+        hudPresenter.dismiss()
     }
 
     private func logTranscriptionTiming(
