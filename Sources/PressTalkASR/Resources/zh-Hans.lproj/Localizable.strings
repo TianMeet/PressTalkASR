@@ -99,6 +99,7 @@
 "settings.prompt.hint" = "仅在 Prompt 非空且录音时长达到阈值时发送。";
 
 "settings.api_source.local_cache" = "本地缓存";
+"settings.api_source.keychain" = "钥匙串";
 "settings.api_source.environment" = "环境变量";
 "settings.api_source.not_set" = "未设置";
 "settings.language.auto" = "自动";
@@ -148,7 +149,6 @@
 "error.api_key.too_short" = "Key 长度过短，请检查是否粘贴完整。";
 
 "error.workflow.missing_api_key" = "未找到 API Key，请在设置中输入并保存。";
-"error.workflow.recording_too_short" = "录音太短，请按住至少 0.2 秒再松开。";
 "error.mic_permission_denied" = "没有麦克风权限，请在 设置 > 权限 中打开麦克风授权。";
 "status.listening_ellipsis" = "录音中…";
 "status.transcribing_ellipsis" = "转写中…";
@@ -156,11 +156,15 @@
 "error.recording_stop_failed_format" = "停止录音失败：%@";
 "feedback.copied" = "已复制";
 "warning.auto_paste_failed" = "已复制，自动粘贴失败";
-"settings.status.api_key_saved_local" = "API Key 已缓存到本地。";
+"settings.status.api_key_saved_keychain" = "API Key 已安全保存到钥匙串。";
+"settings.status.api_key_save_failed_format" = "无法保存 API Key：%@";
 "settings.status.hotkey_invalid" = "快捷键无效：请至少包含一个修饰键。";
 "settings.status.hotkey_updated_format" = "快捷键已更新为 %@。";
 "settings.status.hotkey_update_failed_format" = "快捷键更新失败：%@";
-"settings.status.api_key_cleared_local" = "本地缓存的 API Key 已清除。";
+"settings.status.api_key_cleared_keychain" = "API Key 已从钥匙串移除。";
+"settings.status.api_key_clear_failed_format" = "无法清除 API Key：%@";
+"error.api_key.keychain_invalid_data" = "钥匙串中的 API Key 数据无效。";
+"error.api_key.keychain_failed_format" = "钥匙串操作失败：%@";
 "settings.status.hotkey_capture_cancelled" = "已取消快捷键录制。";
 "settings.status.hotkey_capture_prompt" = "请按下新的快捷键组合…";
 

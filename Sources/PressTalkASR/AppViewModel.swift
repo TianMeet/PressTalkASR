@@ -109,14 +109,11 @@ final class AppViewModel: ObservableObject {
 
     enum WorkflowError: LocalizedError {
         case missingAPIKey
-        case recordingTooShort
 
         var errorDescription: String? {
             switch self {
             case .missingAPIKey:
                 return L10n.tr("error.workflow.missing_api_key")
-            case .recordingTooShort:
-                return L10n.tr("error.workflow.recording_too_short")
             }
         }
     }
@@ -337,6 +334,11 @@ final class AppViewModel: ObservableObject {
         guard !isTranscribing else { return }
         popoverFeedback = .none
 
+        guard settings.resolvedAPIKey() != nil else {
+            showError(WorkflowError.missingAPIKey.localizedDescription)
+            return
+        }
+
         let permissionGranted = await audioRecorder.requestPermission()
         guard permissionGranted else {
             showError(L10n.tr("error.mic_permission_denied"))
@@ -381,7 +383,9 @@ final class AppViewModel: ObservableObject {
         do {
             sourceURL = try audioRecorder.stopRecording()
         } catch {
-            recordingSessionCoordinator.abortStop()
+            audioRecorder.cancelRecording()
+            recordingSessionCoordinator.finishStop()
+            transition(to: .idle)
             showError(L10n.tr("error.recording_stop_failed_format", error.localizedDescription))
             return
         }
@@ -512,6 +516,7 @@ final class AppViewModel: ObservableObject {
         let previewCoalescer = PreviewDeltaCoalescer(interval: Constants.previewThrottleSeconds)
 
         defer {
+            try? FileManager.default.removeItem(at: sourceURL)
             previewCoalescer.reset()
             if activeTranscriptionToken == token {
                 activeTranscriptionToken = nil
@@ -532,7 +537,7 @@ final class AppViewModel: ObservableObject {
                 languageCode: settings.preferredLanguageCode
             )
 
-            let text = try await transcriptionCoordinator.transcribe(
+            let result = try await transcriptionCoordinator.transcribe(
                 sourceURL: sourceURL,
                 recordedSeconds: recordedSeconds,
                 options: options,
@@ -541,13 +546,16 @@ final class AppViewModel: ObservableObject {
                     deltaTimingProbe.markFirstDeltaIfNeeded()
                     previewCoalescer.push(preview) { latest in
                         Task { @MainActor in
-                            guard let self, self.isTranscribing else { return }
+                            guard let self,
+                                  self.activeTranscriptionToken == token,
+                                  self.isTranscribing else { return }
                             self.lastMessage = latest
                             self.hudPresenter.updateTranscribingPreview(latest)
                         }
                     }
                 }
             )
+            let text = result.text
 
             logTranscriptionTiming(
                 startedAt: transcriptionStartedAt,
@@ -575,7 +583,10 @@ final class AppViewModel: ObservableObject {
                 }
             }
 
-            costTracker.add(seconds: recordedSeconds)
+            costTracker.add(
+                seconds: recordedSeconds,
+                usage: result.usage
+            )
             transition(to: .idle)
         } catch {
             logTranscriptionTiming(
@@ -629,8 +640,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func saveAPIKey(_ value: String) -> String {
-        settings.saveAPIKey(value)
-        return L10n.tr("settings.status.api_key_saved_local")
+        do {
+            try settings.saveAPIKey(value)
+            return L10n.tr("settings.status.api_key_saved_keychain")
+        } catch {
+            return L10n.tr("settings.status.api_key_save_failed_format", error.localizedDescription)
+        }
     }
 
     func updateHotkeyShortcut(_ shortcut: HotkeyShortcut) -> String {
@@ -654,8 +669,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func clearAPIKey() -> String {
-        settings.clearAPIKey()
-        return L10n.tr("settings.status.api_key_cleared_local")
+        do {
+            try settings.clearAPIKey()
+            return L10n.tr("settings.status.api_key_cleared_keychain")
+        } catch {
+            return L10n.tr("settings.status.api_key_clear_failed_format", error.localizedDescription)
+        }
     }
 
     private func showError(_ message: String) {

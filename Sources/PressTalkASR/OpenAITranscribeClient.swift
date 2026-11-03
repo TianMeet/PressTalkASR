@@ -23,6 +23,24 @@ enum OpenAIModel: String, CaseIterable, Identifiable {
             return 0.006
         }
     }
+
+    var inputCostPerMillionTokensUSD: Double {
+        switch self {
+        case .gpt4oMiniTranscribe:
+            return 1.25
+        case .gpt4oTranscribe:
+            return 2.50
+        }
+    }
+
+    var outputCostPerMillionTokensUSD: Double {
+        switch self {
+        case .gpt4oMiniTranscribe:
+            return 5.00
+        case .gpt4oTranscribe:
+            return 10.00
+        }
+    }
 }
 
 enum OpenAITranscribeError: LocalizedError {
@@ -30,6 +48,7 @@ enum OpenAITranscribeError: LocalizedError {
     case unauthorized
     case timeout
     case network(String)
+    case rateLimited(message: String, retryAfter: TimeInterval?)
     case server(status: Int, message: String)
     case invalidResponse
     case emptyText
@@ -44,6 +63,8 @@ enum OpenAITranscribeError: LocalizedError {
             return L10n.tr("error.openai.timeout")
         case .network(let message):
             return L10n.tr("error.openai.network_format", message)
+        case .rateLimited(let message, _):
+            return L10n.tr("error.openai.server_format", 429, message)
         case .server(let status, let message):
             return L10n.tr("error.openai.server_format", status, message)
         case .invalidResponse:
@@ -58,18 +79,25 @@ enum OpenAITranscribeError: LocalizedError {
     /// failures or validation issues will never recover on retry.
     var isRecoverable: Bool {
         switch self {
-        case .unauthorized, .fileTooLarge, .emptyText:
+        case .unauthorized, .fileTooLarge, .emptyText, .rateLimited:
             return false
         case .timeout, .network, .invalidResponse:
             return true
         case .server(let status, _):
             // 4xx client errors (except 408/429) are not recoverable
-            return status == 408 || status == 429 || status >= 500
+            return status == 408 || status >= 500
         }
     }
 }
 
 final class OpenAITranscribeClient {
+    static let transcriptionResponseFormat = "json"
+
+    private struct TranscriptionJSONResponse: Decodable {
+        let text: String
+        let usage: TranscriptionUsage?
+    }
+
     private struct MultipartStaticSections {
         let preamble: Data
         let epilogue: Data
@@ -81,7 +109,7 @@ final class OpenAITranscribeClient {
         let writerHandle: MultipartWriterHandle
     }
 
-    private final class MultipartWriterHandle {
+    private final class MultipartWriterHandle: @unchecked Sendable {
         private final class Worker: NSObject {
             weak var owner: MultipartWriterHandle?
             let preamble: Data
@@ -149,15 +177,19 @@ final class OpenAITranscribeClient {
                 return try existing.get()
             }
 
-            return try await withCheckedThrowingContinuation { continuation in
-                lock.lock()
-                if let result {
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    lock.lock()
+                    if let result {
+                        lock.unlock()
+                        continuation.resume(with: result)
+                        return
+                    }
+                    waiters.append(continuation)
                     lock.unlock()
-                    continuation.resume(with: result)
-                    return
                 }
-                waiters.append(continuation)
-                lock.unlock()
+            } onCancel: {
+                cancel()
             }
         }
 
@@ -216,7 +248,7 @@ final class OpenAITranscribeClient {
         static let errorResponseReserveBytes = 4096
     }
 
-    private let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+    private let endpoint: URL
     private let session: URLSession
     private let prewarmGate = PrewarmGate(minInterval: Constants.prewarmMinInterval)
     private let keepWarmController = KeepWarmController()
@@ -226,7 +258,7 @@ final class OpenAITranscribeClient {
         initialDelayNs: Constants.initialRetryDelayNs
     )
 
-    init() {
+    convenience init() {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = Constants.requestTimeoutInterval
         configuration.timeoutIntervalForResource = Constants.resourceTimeoutInterval
@@ -234,7 +266,15 @@ final class OpenAITranscribeClient {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
         configuration.httpShouldUsePipelining = true
-        session = URLSession(configuration: configuration)
+        self.init(
+            session: URLSession(configuration: configuration),
+            endpoint: URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+        )
+    }
+
+    init(session: URLSession, endpoint: URL) {
+        self.session = session
+        self.endpoint = endpoint
     }
 
     /// 预热到 OpenAI 的 TLS 连接，录音期间提前握手以减少上传延迟。
@@ -265,28 +305,42 @@ final class OpenAITranscribeClient {
         languageCode: String?,
         apiKey: String,
         onDelta: (@Sendable (String) -> Void)? = nil
-    ) async throws -> String {
-        do {
-            return try await transcribeStreaming(
-                fileURL: fileURL,
-                model: model,
-                prompt: prompt,
-                languageCode: languageCode,
-                apiKey: apiKey,
-                onDelta: onDelta
-            )
-        } catch let error as OpenAITranscribeError where error.isRecoverable {
-            // Only fall back to non-streaming for recoverable errors
-            // (e.g. streaming not supported). Terminal errors (401, file too
-            // large, empty) are re-thrown immediately to avoid a wasted request.
-            return try await transcribeNonStreaming(
-                fileURL: fileURL,
-                model: model,
-                prompt: prompt,
-                languageCode: languageCode,
-                apiKey: apiKey
-            )
+    ) async throws -> TranscriptionResult {
+        var retryDelay = retryPolicy.initialDelayNs
+        for attempt in 0..<retryPolicy.maxAttempts {
+            do {
+                return try await transcribeStreaming(
+                    fileURL: fileURL,
+                    model: model,
+                    prompt: prompt,
+                    languageCode: languageCode,
+                    apiKey: apiKey,
+                    onDelta: onDelta
+                )
+            } catch let error as OpenAITranscribeError {
+                try Task.checkCancellation()
+                if case .rateLimited = error, attempt < retryPolicy.maxAttempts - 1 {
+                    try await Task.sleep(
+                        nanoseconds: retryPolicy.delayNanoseconds(for: error, fallback: retryDelay)
+                    )
+                    retryDelay = retryPolicy.nextDelay(after: retryDelay)
+                    continue
+                }
+
+                guard error.isRecoverable else { throw error }
+                // A transport or streaming-protocol failure may still succeed
+                // through the simpler non-streaming response path.
+                return try await transcribeNonStreaming(
+                    fileURL: fileURL,
+                    model: model,
+                    prompt: prompt,
+                    languageCode: languageCode,
+                    apiKey: apiKey
+                )
+            }
         }
+
+        throw OpenAITranscribeError.invalidResponse
     }
 
     private func transcribeNonStreaming(
@@ -295,7 +349,7 @@ final class OpenAITranscribeClient {
         prompt: String?,
         languageCode: String?,
         apiKey: String
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         if fileSize > Constants.maxFileSizeBytes {
             throw OpenAITranscribeError.fileTooLarge
@@ -314,12 +368,16 @@ final class OpenAITranscribeClient {
                 )
                 return try await performDataRequest(request: multipart.request, writerHandle: multipart.writerHandle)
             } catch let error as OpenAITranscribeError {
+                try Task.checkCancellation()
                 if !retryPolicy.shouldRetry(error) || attempt == retryPolicy.maxAttempts - 1 {
                     throw error
                 }
-                try await Task.sleep(nanoseconds: retryDelay)
+                try await Task.sleep(
+                    nanoseconds: retryPolicy.delayNanoseconds(for: error, fallback: retryDelay)
+                )
                 retryDelay = retryPolicy.nextDelay(after: retryDelay)
             } catch {
+                try Task.checkCancellation()
                 if attempt == retryPolicy.maxAttempts - 1 { throw error }
                 try await Task.sleep(nanoseconds: retryDelay)
                 retryDelay = retryPolicy.nextDelay(after: retryDelay)
@@ -336,7 +394,7 @@ final class OpenAITranscribeClient {
         languageCode: String?,
         apiKey: String,
         onDelta: (@Sendable (String) -> Void)? = nil
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         if fileSize > Constants.maxFileSizeBytes {
             throw OpenAITranscribeError.fileTooLarge
@@ -352,21 +410,21 @@ final class OpenAITranscribeClient {
 
         do {
             let (bytes, response) = try await session.bytes(for: multipart.request)
-            try await awaitWriterCompletion(multipart.writerHandle)
             guard let http = response as? HTTPURLResponse else {
+                multipart.writerHandle.cancel()
                 throw OpenAITranscribeError.invalidResponse
             }
 
             guard (200...299).contains(http.statusCode) else {
+                multipart.writerHandle.cancel()
                 let payload = try await consumeBytes(bytes)
-                if http.statusCode == 401 {
-                    throw OpenAITranscribeError.unauthorized
-                }
-                let message = parseErrorMessage(from: payload) ?? L10n.tr("error.openai.unknown_server")
-                throw OpenAITranscribeError.server(status: http.statusCode, message: message)
+                throw makeHTTPError(response: http, payload: payload)
             }
 
+            try await awaitWriterCompletion(multipart.writerHandle)
+
             var aggregated = ""
+            var finalUsage: TranscriptionUsage?
             for try await line in bytes.lines {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
@@ -389,10 +447,11 @@ final class OpenAITranscribeClient {
                     guard !delta.isEmpty else { continue }
                     aggregated.append(delta)
                     onDelta?(aggregated)
-                case .done(let text):
+                case .done(let text, let usage):
+                    finalUsage = usage
                     let final = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !final.isEmpty {
-                        return final
+                        return TranscriptionResult(text: final, usage: usage)
                     }
                 case .error(let message):
                     throw OpenAITranscribeError.server(status: http.statusCode, message: message)
@@ -403,7 +462,7 @@ final class OpenAITranscribeClient {
 
             let fallbackFinal = aggregated.trimmingCharacters(in: .whitespacesAndNewlines)
             if !fallbackFinal.isEmpty {
-                return fallbackFinal
+                return TranscriptionResult(text: fallbackFinal, usage: finalUsage)
             }
             throw OpenAITranscribeError.emptyText
         } catch let error as URLError {
@@ -420,33 +479,25 @@ final class OpenAITranscribeClient {
         }
     }
 
-    private func performDataRequest(request: URLRequest, writerHandle: MultipartWriterHandle) async throws -> String {
+    private func performDataRequest(
+        request: URLRequest,
+        writerHandle: MultipartWriterHandle
+    ) async throws -> TranscriptionResult {
         do {
-            let (data, response) = try await session.data(for: request)
-            try await awaitWriterCompletion(writerHandle)
+            let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse else {
+                writerHandle.cancel()
                 throw OpenAITranscribeError.invalidResponse
             }
 
-            switch http.statusCode {
-            case 200...299:
-                guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !text.isEmpty else {
-                    throw OpenAITranscribeError.emptyText
-                }
-                return text
-
-            case 401:
-                throw OpenAITranscribeError.unauthorized
-
-            case 408, 429, 500...599:
-                let message = parseErrorMessage(from: data) ?? L10n.tr("error.openai.temp_server_issue")
-                throw OpenAITranscribeError.server(status: http.statusCode, message: message)
-
-            default:
-                let message = parseErrorMessage(from: data) ?? L10n.tr("error.openai.unknown_server")
-                throw OpenAITranscribeError.server(status: http.statusCode, message: message)
+            guard (200...299).contains(http.statusCode) else {
+                writerHandle.cancel()
+                let payload = try await consumeBytes(bytes)
+                throw makeHTTPError(response: http, payload: payload)
             }
+
+            try await awaitWriterCompletion(writerHandle)
+            return try Self.decodeTranscriptionResponse(try await consumeBytes(bytes))
         } catch let error as URLError {
             writerHandle.cancel()
             switch error.code {
@@ -486,6 +537,50 @@ final class OpenAITranscribeClient {
         }
 
         return nil
+    }
+
+    static func decodeTranscriptionResponse(_ data: Data) throws -> TranscriptionResult {
+        guard let response = try? JSONDecoder().decode(TranscriptionJSONResponse.self, from: data) else {
+            throw OpenAITranscribeError.invalidResponse
+        }
+        let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw OpenAITranscribeError.emptyText
+        }
+        return TranscriptionResult(text: text, usage: response.usage)
+    }
+
+    private func makeHTTPError(response: HTTPURLResponse, payload: Data) -> OpenAITranscribeError {
+        if response.statusCode == 401 {
+            return .unauthorized
+        }
+
+        let defaultMessage = (response.statusCode == 408 || response.statusCode == 429 || response.statusCode >= 500)
+            ? L10n.tr("error.openai.temp_server_issue")
+            : L10n.tr("error.openai.unknown_server")
+        let message = parseErrorMessage(from: payload) ?? defaultMessage
+
+        if response.statusCode == 429 {
+            return .rateLimited(
+                message: message,
+                retryAfter: retryAfterSeconds(from: response.value(forHTTPHeaderField: "Retry-After"))
+            )
+        }
+        return .server(status: response.statusCode, message: message)
+    }
+
+    private func retryAfterSeconds(from value: String?) -> TimeInterval? {
+        guard let value else { return nil }
+        if let seconds = TimeInterval(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return max(0, seconds)
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
+        guard let date = formatter.date(from: value) else { return nil }
+        return max(0, date.timeIntervalSinceNow)
     }
 
     private func makeStreamingMultipartRequest(
@@ -539,7 +634,11 @@ final class OpenAITranscribeClient {
         let mimeType = mimeType(for: fileURL.pathExtension.lowercased())
         var preamble = Data()
         preamble.append(formField(name: "model", value: model.rawValue, boundary: boundary))
-        preamble.append(formField(name: "response_format", value: streaming ? "json" : "text", boundary: boundary))
+        preamble.append(formField(
+            name: "response_format",
+            value: Self.transcriptionResponseFormat,
+            boundary: boundary
+        ))
         if streaming {
             preamble.append(formField(name: "stream", value: "true", boundary: boundary))
         }
@@ -673,7 +772,7 @@ final class OpenAITranscribeClient {
         do {
             try await writerHandle.waitForCompletion()
         } catch is CancellationError {
-            throw OpenAITranscribeError.network(L10n.tr("error.openai.upload_stream_cancelled"))
+            throw CancellationError()
         } catch let error as OpenAITranscribeError {
             throw error
         } catch {

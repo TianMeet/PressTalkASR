@@ -7,7 +7,7 @@ final class TranscribeRetryPolicyTests: XCTestCase {
     func testRetryableErrors() {
         XCTAssertTrue(policy.shouldRetry(.timeout))
         XCTAssertTrue(policy.shouldRetry(.network("offline")))
-        XCTAssertTrue(policy.shouldRetry(.server(status: 429, message: "busy")))
+        XCTAssertTrue(policy.shouldRetry(.rateLimited(message: "busy", retryAfter: 2)))
         XCTAssertTrue(policy.shouldRetry(.server(status: 503, message: "down")))
     }
 
@@ -20,5 +20,10 @@ final class TranscribeRetryPolicyTests: XCTestCase {
     func testBackoffDoublesDelay() {
         XCTAssertEqual(policy.nextDelay(after: 400_000_000), 800_000_000)
         XCTAssertEqual(policy.nextDelay(after: 800_000_000), 1_600_000_000)
+    }
+
+    func testRateLimitDelayUsesRetryAfterHeader() {
+        let error = OpenAITranscribeError.rateLimited(message: "busy", retryAfter: 2.5)
+        XCTAssertEqual(policy.delayNanoseconds(for: error, fallback: 400_000_000), 2_500_000_000)
     }
 }

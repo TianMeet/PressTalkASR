@@ -14,7 +14,7 @@ struct VADTrimmer: Sendable {
     }
 
     func trimSilence(inputURL: URL) async throws -> URL {
-        try await Task.detached(priority: .userInitiated) { [configuration] in
+        let worker = Task.detached(priority: .userInitiated) { [configuration] in
             try Task.checkCancellation()
             let inputFile = try AVAudioFile(forReading: inputURL)
             let format = inputFile.processingFormat
@@ -145,6 +145,12 @@ struct VADTrimmer: Sendable {
             let outputURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("press-talk-trimmed-\(UUID().uuidString)")
                 .appendingPathExtension("wav")
+            var shouldDeleteOutput = true
+            defer {
+                if shouldDeleteOutput {
+                    try? FileManager.default.removeItem(at: outputURL)
+                }
+            }
 
             let outputFile = try AVAudioFile(
                 forWriting: outputURL,
@@ -154,17 +160,24 @@ struct VADTrimmer: Sendable {
             )
             try Task.checkCancellation()
             try outputFile.write(from: trimmedBuffer)
+            try Task.checkCancellation()
 
             // If the trimmed WAV is larger than the original compressed file
             // (e.g. m4a/AAC input), prefer the original — smaller upload = faster.
             let originalSize = (try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             let trimmedSize = (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             if trimmedSize >= originalSize && originalSize > 0 {
-                try? FileManager.default.removeItem(at: outputURL)
                 return inputURL
             }
 
+            shouldDeleteOutput = false
             return outputURL
-        }.value
+        }
+
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 }

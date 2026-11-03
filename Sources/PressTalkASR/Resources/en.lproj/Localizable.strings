@@ -99,6 +99,7 @@
 "settings.prompt.hint" = "Sent only when prompt is non-empty and duration passes threshold.";
 
 "settings.api_source.local_cache" = "Local Cache";
+"settings.api_source.keychain" = "Keychain";
 "settings.api_source.environment" = "Environment";
 "settings.api_source.not_set" = "Not Set";
 "settings.language.auto" = "Auto";
@@ -148,7 +149,6 @@
 "error.api_key.too_short" = "Key is too short. Please verify it was pasted completely.";
 
 "error.workflow.missing_api_key" = "API key not found. Please set it in Settings.";
-"error.workflow.recording_too_short" = "Recording is too short. Hold for at least 0.2s.";
 "error.mic_permission_denied" = "Microphone permission is missing. Enable it in Settings > Permissions.";
 "status.listening_ellipsis" = "Listening…";
 "status.transcribing_ellipsis" = "Transcribing…";
@@ -156,11 +156,15 @@
 "error.recording_stop_failed_format" = "Failed to stop recording: %@";
 "feedback.copied" = "Copied";
 "warning.auto_paste_failed" = "Copied, but auto paste failed";
-"settings.status.api_key_saved_local" = "API key saved locally.";
+"settings.status.api_key_saved_keychain" = "API key saved securely in Keychain.";
+"settings.status.api_key_save_failed_format" = "Could not save API key: %@";
 "settings.status.hotkey_invalid" = "Invalid shortcut: include at least one modifier.";
 "settings.status.hotkey_updated_format" = "Shortcut updated to %@.";
 "settings.status.hotkey_update_failed_format" = "Failed to update shortcut: %@";
-"settings.status.api_key_cleared_local" = "Local API key cache cleared.";
+"settings.status.api_key_cleared_keychain" = "API key removed from Keychain.";
+"settings.status.api_key_clear_failed_format" = "Could not clear API key: %@";
+"error.api_key.keychain_invalid_data" = "The API key stored in Keychain is invalid.";
+"error.api_key.keychain_failed_format" = "Keychain operation failed: %@";
 "settings.status.hotkey_capture_cancelled" = "Shortcut recording canceled.";
 "settings.status.hotkey_capture_prompt" = "Press a new shortcut combination…";
 

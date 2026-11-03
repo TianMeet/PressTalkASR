@@ -2,7 +2,7 @@ import Foundation
 
 enum TranscriptionStreamEvent: Equatable {
     case delta(String)
-    case done(String)
+    case done(String, TranscriptionUsage?)
     case error(String)
     case ignore
 }
@@ -32,7 +32,7 @@ struct TranscriptionStreamEventParser {
 
         if eventType.contains("done") {
             let text = extractString(from: object, keys: ["text", "transcript"]) ?? ""
-            return .done(text)
+            return .done(text, extractUsage(from: object))
         }
 
         if let delta = extractString(from: object, keys: ["delta"]), !delta.isEmpty {
@@ -40,10 +40,19 @@ struct TranscriptionStreamEventParser {
         }
 
         if let text = extractString(from: object, keys: ["text"]), !text.isEmpty {
-            return .done(text)
+            return .done(text, extractUsage(from: object))
         }
 
         return .ignore
+    }
+
+    private func extractUsage(from object: [String: Any]) -> TranscriptionUsage? {
+        guard let usage = object["usage"] as? [String: Any],
+              JSONSerialization.isValidJSONObject(usage),
+              let data = try? JSONSerialization.data(withJSONObject: usage) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(TranscriptionUsage.self, from: data)
     }
 
     private func extractString(from object: [String: Any], keys: [String]) -> String? {

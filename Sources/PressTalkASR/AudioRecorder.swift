@@ -35,7 +35,6 @@ final class AudioRecorder {
         }
     }
 
-    var onRMS: ((Float) -> Void)?
     var onMeterSample: ((MeterSample) -> Void)?
 
     private enum Constants {
@@ -129,7 +128,10 @@ final class AudioRecorder {
                     preparedURL = targetURL
                     break
                 }
+                recorder.stop()
+                try? FileManager.default.removeItem(at: targetURL)
             } catch {
+                try? FileManager.default.removeItem(at: targetURL)
                 continue
             }
         }
@@ -163,6 +165,22 @@ final class AudioRecorder {
         return url
     }
 
+    func cancelRecording() {
+        guard let recorder else {
+            stopMetering()
+            startUptime = nil
+            return
+        }
+
+        recorder.stop()
+        stopMetering()
+        let url = recorder.url
+        self.recorder = nil
+        startUptime = nil
+        lastDuration = 0
+        try? FileManager.default.removeItem(at: url)
+    }
+
     private func startMetering() {
         stopMetering()
 
@@ -185,7 +203,6 @@ final class AudioRecorder {
             }
             self.lastMeterTimestamp = now
 
-            self.onRMS?(clampedRMS)
             self.onMeterSample?(
                 MeterSample(
                     rms: clampedRMS,

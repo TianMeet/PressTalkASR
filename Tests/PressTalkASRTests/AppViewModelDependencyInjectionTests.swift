@@ -6,7 +6,7 @@ import Carbon
 @MainActor
 final class AppViewModelDependencyInjectionTests: XCTestCase {
     func testInitRegistersConfiguredHotkeyOnInjectedManager() {
-        let settings = AppSettings()
+        let settings = makeTestSettings()
         settings.hotkeyShortcut = .defaultPushToTalk
         let hotkeyManager = MockHotkeyManager()
 
@@ -17,7 +17,7 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
     }
 
     func testInitAppliesConfiguredHUDAnchorToPresenter() async {
-        let settings = AppSettings()
+        let settings = makeTestSettings()
         let hotkeyManager = MockHotkeyManager()
         let hudPresenter = MockHUDPresenter()
 
@@ -41,7 +41,7 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
     }
 
     func testUpdateHotkeyShortcutFallsBackToPreviousOnFailure() {
-        let settings = AppSettings()
+        let settings = makeTestSettings()
         settings.hotkeyShortcut = .defaultPushToTalk
         let hotkeyManager = MockHotkeyManager()
         let viewModel = makeViewModel(settings: settings, hotkeyManager: hotkeyManager)
@@ -60,9 +60,9 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         XCTAssertEqual(Array(hotkeyManager.registeredShortcuts.suffix(2)), [failingShortcut, previous])
     }
 
-    func testStopRecordingTransitionsDirectlyToTranscribingWithoutIdleFlicker() async {
-        let settings = AppSettings()
-        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+    func testStopRecordingTransitionsDirectlyToTranscribingWithoutIdleFlicker() async throws {
+        let settings = makeTestSettings()
+        try settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
 
         let hotkeyManager = MockHotkeyManager()
         let audioRecorder = MockAudioRecorder()
@@ -120,9 +120,9 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         transcribeClient.resume(with: "ok")
     }
 
-    func testMaxRecordingDurationAutomaticallyStopsAndTranscribes() async {
-        let settings = AppSettings()
-        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+    func testMaxRecordingDurationAutomaticallyStopsAndTranscribes() async throws {
+        let settings = makeTestSettings()
+        try settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
 
         let hotkeyManager = MockHotkeyManager()
         let audioRecorder = MockAudioRecorder()
@@ -165,9 +165,9 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         transcribeClient.resume(with: "ok")
     }
 
-    func testHotkeyDownDuringTranscribingCancelsCurrentTranscription() async {
-        let settings = AppSettings()
-        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+    func testHotkeyDownDuringTranscribingCancelsCurrentTranscription() async throws {
+        let settings = makeTestSettings()
+        try settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
 
         let hotkeyManager = MockHotkeyManager()
         let audioRecorder = MockAudioRecorder()
@@ -222,9 +222,9 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         await Task.yield()
     }
 
-    func testAutoPasteWaitsBrieflyAfterCopy() async {
-        let settings = AppSettings()
-        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+    func testAutoPasteWaitsBrieflyAfterCopy() async throws {
+        let settings = makeTestSettings()
+        try settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
         settings.autoPasteEnabled = true
 
         let hotkeyManager = MockHotkeyManager()
@@ -265,9 +265,9 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(pasteTime - copyTime, 0.05)
     }
 
-    func testShortRecordingIsSilentlyDiscardedWithoutErrorHUD() async {
-        let settings = AppSettings()
-        settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+    func testShortRecordingIsSilentlyDiscardedWithoutErrorHUD() async throws {
+        let settings = makeTestSettings()
+        try settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
 
         let hotkeyManager = MockHotkeyManager()
         let audioRecorder = MockAudioRecorder()
@@ -302,6 +302,53 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
         XCTAssertEqual(hudPresenter.dismissCallCount, 1)
     }
 
+    func testMissingAPIKeyDoesNotStartRecording() async {
+        let settings = makeTestSettings()
+        let audioRecorder = MockAudioRecorder()
+        let hudPresenter = MockHUDPresenter()
+        let viewModel = AppViewModel(
+            settings: settings,
+            costTracker: CostTracker(),
+            hotkeyManager: MockHotkeyManager(),
+            audioRecorder: audioRecorder,
+            vadTrimmer: MockVADTrimmer(),
+            transcribeClient: MockTranscribeClient(),
+            hudPresenter: hudPresenter,
+            clipboardService: MockClipboardService()
+        )
+
+        await viewModel.beginPushToTalk()
+
+        XCTAssertEqual(audioRecorder.startCallCount, 0)
+        XCTAssertEqual(viewModel.sessionPhase, .idle)
+        XCTAssertEqual(hudPresenter.showErrorReasons.count, 1)
+    }
+
+    func testStopFailureCancelsRecorderAndReturnsToIdle() async throws {
+        let settings = makeTestSettings()
+        try settings.saveAPIKey("sk-test-abcdefghijklmnopqrstuvwxyz")
+        let audioRecorder = MockAudioRecorder()
+        audioRecorder.stopError = MockAudioRecorderError.stopFailed
+        let hudPresenter = MockHUDPresenter()
+        let viewModel = AppViewModel(
+            settings: settings,
+            costTracker: CostTracker(),
+            hotkeyManager: MockHotkeyManager(),
+            audioRecorder: audioRecorder,
+            vadTrimmer: MockVADTrimmer(),
+            transcribeClient: MockTranscribeClient(),
+            hudPresenter: hudPresenter,
+            clipboardService: MockClipboardService()
+        )
+
+        await viewModel.beginPushToTalk()
+        await viewModel.endPushToTalk()
+
+        XCTAssertEqual(viewModel.sessionPhase, .idle)
+        XCTAssertEqual(audioRecorder.cancelCallCount, 1)
+        XCTAssertEqual(hudPresenter.showErrorReasons.count, 1)
+    }
+
     private func makeViewModel(
         settings: AppSettings,
         hotkeyManager: MockHotkeyManager
@@ -321,6 +368,10 @@ final class AppViewModelDependencyInjectionTests: XCTestCase {
 
 private enum MockHotkeyError: Error {
     case failed
+}
+
+private enum MockAudioRecorderError: Error {
+    case stopFailed
 }
 
 @MainActor
@@ -343,10 +394,14 @@ private final class MockAudioRecorder: AudioRecordingServicing {
     var onMeterSample: ((AudioRecorder.MeterSample) -> Void)?
     var lastDuration: TimeInterval = 0
     var recordingURL: URL?
+    var stopError: Error?
+    private(set) var startCallCount = 0
+    private(set) var cancelCallCount = 0
 
     func requestPermission() async -> Bool { true }
 
     func startRecording() throws -> URL {
+        startCallCount += 1
         if let recordingURL {
             return recordingURL
         }
@@ -356,12 +411,17 @@ private final class MockAudioRecorder: AudioRecordingServicing {
     }
 
     func stopRecording() throws -> URL {
+        if let stopError { throw stopError }
         if let recordingURL {
             return recordingURL
         }
         return FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("wav")
+    }
+
+    func cancelRecording() {
+        cancelCallCount += 1
     }
 }
 
@@ -380,14 +440,14 @@ private struct MockTranscribeClient: TranscriptionServicing {
         languageCode: String?,
         apiKey: String,
         onDelta: (@Sendable (String) -> Void)?
-    ) async throws -> String {
-        "ok"
+    ) async throws -> TranscriptionResult {
+        TranscriptionResult(text: "ok")
     }
 }
 
 @MainActor
 private final class BlockingTranscribeClient: TranscriptionServicing {
-    private var continuation: CheckedContinuation<String, Never>?
+    private var continuation: CheckedContinuation<TranscriptionResult, Never>?
 
     func keepWarmForInteractionWindow() {}
 
@@ -398,16 +458,36 @@ private final class BlockingTranscribeClient: TranscriptionServicing {
         languageCode: String?,
         apiKey: String,
         onDelta: (@Sendable (String) -> Void)?
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
         }
     }
 
     func resume(with text: String) {
-        continuation?.resume(returning: text)
+        continuation?.resume(returning: TranscriptionResult(text: text))
         continuation = nil
     }
+}
+
+@MainActor
+private func makeTestSettings() -> AppSettings {
+    let suiteName = "PressTalkASRTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return AppSettings(
+        defaults: defaults,
+        apiKeyStore: InMemoryAPIKeyStore(),
+        environment: [:]
+    )
+}
+
+private final class InMemoryAPIKeyStore: APIKeyStoring {
+    private var value: String?
+
+    func read() throws -> String? { value }
+    func save(_ value: String) throws { self.value = value }
+    func delete() throws { value = nil }
 }
 
 @MainActor

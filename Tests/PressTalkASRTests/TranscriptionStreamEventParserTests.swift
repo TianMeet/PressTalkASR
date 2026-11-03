@@ -11,7 +11,19 @@ final class TranscriptionStreamEventParserTests: XCTestCase {
 
     func testParseDoneEvent() {
         let payload = #"{"event":"transcript.done","text":"final text"}"#
-        XCTAssertEqual(parser.parse(payload: payload), .done("final text"))
+        XCTAssertEqual(parser.parse(payload: payload), .done("final text", nil))
+    }
+
+    func testParseDoneEventUsage() {
+        let payload = #"{"type":"transcript.text.done","text":"final","usage":{"input_tokens":14,"output_tokens":45,"total_tokens":59,"input_token_details":{"audio_tokens":14,"text_tokens":0}}}"#
+        let usage = TranscriptionUsage(
+            inputTokens: 14,
+            outputTokens: 45,
+            totalTokens: 59,
+            audioInputTokens: 14,
+            textInputTokens: 0
+        )
+        XCTAssertEqual(parser.parse(payload: payload), .done("final", usage))
     }
 
     func testParseNestedErrorMessage() {

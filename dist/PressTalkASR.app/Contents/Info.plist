@@ -6,8 +6,12 @@
     <string>PressTalkASR</string>
     <key>CFBundleDisplayName</key>
     <string>PressTalkASR</string>
+    <key>CFBundleExecutable</key>
+    <string>PressTalkASR</string>
     <key>CFBundleIdentifier</key>
     <string>com.xingkong.PressTalkASR</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>

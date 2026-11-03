@@ -14,6 +14,7 @@ protocol AudioRecordingServicing: AnyObject {
     func requestPermission() async -> Bool
     func startRecording() throws -> URL
     func stopRecording() throws -> URL
+    func cancelRecording()
 }
 
 protocol SilenceTrimming: Sendable {
@@ -30,7 +31,7 @@ protocol TranscriptionServicing {
         languageCode: String?,
         apiKey: String,
         onDelta: (@Sendable (String) -> Void)?
-    ) async throws -> String
+    ) async throws -> TranscriptionResult
 }
 
 @MainActor

@@ -17,7 +17,7 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
 - VAD 头尾静音裁剪（上传前减小体积、减少等待）
 - 静音自动结束（Auto Stop on Silence）
 - 每日时长与费用估算
-- 本地缓存 API Key（设置页输入，掩码展示）
+- Keychain 安全存储 API Key（设置页输入，掩码展示）
 
 ## 技术架构
 
@@ -68,7 +68,7 @@ PressTalk ASR 是一个 macOS 状态栏语音转文字工具，核心交互为�
 ## 配置项（Settings）
 
 - API & Model
-  - API Key（本地缓存）
+  - API Key（Keychain 安全存储）
   - 模型：`gpt-4o-mini-transcribe` / `gpt-4o-transcribe`
   - Language：Auto / 中文 / English
   - Prompt（可配置最短时长门槛后发送）
@@ -130,6 +130,30 @@ swift run PressTalkASR
 2. 选择 `PressTalkASR` scheme
 3. Run 启动
 
+### 打包发布（DMG）
+
+使用仓库脚本 `scripts/package.sh`：
+
+```bash
+# 本地包：ad-hoc 签名 + dmg
+./scripts/package.sh local
+
+# 发布包：Developer ID 签名 + dmg
+SIGN_ID="Developer ID Application: Your Name (TEAMID)" ./scripts/package.sh release
+
+# 发布并公证（可选）
+SIGN_ID="Developer ID Application: Your Name (TEAMID)" \
+NOTARY_PROFILE="AC_NOTARY" \
+./scripts/package.sh release
+```
+
+说明：
+
+- `CLEAN_BUILD=1` 会先清理 `.build` 和模块缓存，再执行打包
+- `PACK_CACHE_ROOT=/path/to/cache` 可自定义 Swift 模块缓存目录
+- 脚本会输出产物的 `SHA256` 与文件大小，便于分发校验
+- 默认输出目录为 `dist/`
+
 ## 权限要求
 
 - Microphone：录音必需
@@ -139,9 +163,9 @@ swift run PressTalkASR
 
 ## API Key 说明
 
-- 当前实现为“本地缓存模式”（非 Keychain）
+- API Key 使用 macOS Keychain 保存，应用启动时读取一次，后续转写使用内存缓存
+- 旧版本保存在 UserDefaults 的 Key 会在首次启动时自动迁移并删除明文项
 - UI 仅展示掩码，不默认回显明文
-- 建议仅在受信任设备使用，必要时定期更换 Key
 
 ## 典型排障
 

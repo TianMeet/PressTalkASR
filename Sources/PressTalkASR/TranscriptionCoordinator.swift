@@ -19,6 +19,12 @@ struct TranscriptionRequestOptions {
 }
 
 struct TranscriptionCoordinator {
+    private enum TrimAttemptResult: Sendable {
+        case completed(URL)
+        case timeout
+        case failed
+    }
+
     private enum Constants {
         static let trimMinDurationSecondsForUpload: TimeInterval = 1.2
         static let trimMinDurationSecondsForCompressed: TimeInterval = 8.0
@@ -45,13 +51,15 @@ struct TranscriptionCoordinator {
         options: TranscriptionRequestOptions,
         apiKey: String,
         onDelta: (@Sendable (String) -> Void)?
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         var urlsToDelete = [sourceURL]
         var requestURL = sourceURL
 
         defer {
             urlsToDelete.forEach { try? FileManager.default.removeItem(at: $0) }
         }
+
+        try Task.checkCancellation()
 
         let fileSize = (try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard fileSize > Constants.fileStabilityMinBytes else {
@@ -72,6 +80,8 @@ struct TranscriptionCoordinator {
             }
         }
 
+        try Task.checkCancellation()
+
         return try await transcribeClient.transcribe(
             fileURL: requestURL,
             model: options.model,
@@ -85,22 +95,37 @@ struct TranscriptionCoordinator {
     @MainActor
     private func trimSilenceBestEffort(inputURL: URL) async -> URL {
         let trimmer = vadTrimmer
-        do {
-            return try await withThrowingTaskGroup(of: URL.self) { group in
-                group.addTask {
-                    try await trimmer.trimSilence(inputURL: inputURL)
+        return await withTaskGroup(of: TrimAttemptResult.self) { group in
+            group.addTask {
+                do {
+                    return .completed(try await trimmer.trimSilence(inputURL: inputURL))
+                } catch {
+                    return .failed
                 }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: Constants.trimBudgetNs)
-                    return inputURL
-                }
-                let chosen = try await group.next() ?? inputURL
-                group.cancelAll()
-                return chosen
             }
-        } catch is CancellationError {
-            return inputURL
-        } catch {
+            group.addTask {
+                do {
+                    try await Task.sleep(nanoseconds: Constants.trimBudgetNs)
+                    return .timeout
+                } catch {
+                    return .failed
+                }
+            }
+
+            let first = await group.next() ?? .failed
+            group.cancelAll()
+
+            if case .completed(let url) = first {
+                return url
+            }
+
+            // Drain the canceled trim task so a result that raced with the
+            // timeout cannot leave an unowned temporary WAV behind.
+            for await result in group {
+                if case .completed(let url) = result, url != inputURL {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
             return inputURL
         }
     }

@@ -3,9 +3,58 @@
 <plist version="1.0">
 <dict>
 	<key>files</key>
-	<dict/>
+	<dict>
+		<key>Resources/PressTalkASR_PressTalkASR.bundle/Info.plist</key>
+		<data>
+		uymk7XE1lecevG2C1bUxtovL2Oo=
+		</data>
+		<key>Resources/PressTalkASR_PressTalkASR.bundle/en.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			ksQwJo3l3LzB527+CAFWodbZQ6A=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
+		<key>Resources/PressTalkASR_PressTalkASR.bundle/zh-hans.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			aaEkhpofDnnMuhspIKEG4TPmL3g=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
+	</dict>
 	<key>files2</key>
-	<dict/>
+	<dict>
+		<key>Resources/PressTalkASR_PressTalkASR.bundle/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FLS4J4T8WFkqpyENnxaU/w3VgyuKFWdSfsF9bw0vNUY=
+			</data>
+		</dict>
+		<key>Resources/PressTalkASR_PressTalkASR.bundle/en.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			zz30XFrRU54J1cuVxYd6nvQPdSssa/ETjxvwKRsyT4k=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
+		<key>Resources/PressTalkASR_PressTalkASR.bundle/zh-hans.lproj/Localizable.strings</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			GBw/5S4irTs1a13Jau6W4dTNzLP9ui0JwjZBGaSerxs=
+			</data>
+			<key>optional</key>
+			<true/>
+		</dict>
+	</dict>
 	<key>rules</key>
 	<dict>
 		<key>^Resources/</key>

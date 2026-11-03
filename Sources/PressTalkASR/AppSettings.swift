@@ -4,12 +4,15 @@ import Combine
 @MainActor
 final class AppSettings: ObservableObject {
     enum APIKeySource {
+        case keychain
         case localCache
         case environment
         case none
 
         var title: String {
             switch self {
+            case .keychain:
+                return L10n.tr("settings.api_source.keychain")
             case .localCache:
                 return L10n.tr("settings.api_source.local_cache")
             case .environment:
@@ -56,11 +59,12 @@ final class AppSettings: ObservableObject {
         static let promptEnabled = "promptEnabled"
         static let promptMinDurationSeconds = "promptMinDurationSeconds"
         static let languageModeRawValue = "languageModeRawValue"
-        static let useFullWidthPunctuation = "useFullWidthPunctuation"
         static let apiKeyLocalCache = "apiKeyLocalCache"
     }
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let apiKeyStore: any APIKeyStoring
+    private let environment: [String: String]
     private var cachedAPIKey: String?
 
     @Published private(set) var apiKeySourceState: APIKeySource = .none
@@ -136,11 +140,14 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var useFullWidthPunctuation: Bool {
-        didSet { defaults.set(useFullWidthPunctuation, forKey: Keys.useFullWidthPunctuation) }
-    }
-
-    init() {
+    init(
+        defaults: UserDefaults = .standard,
+        apiKeyStore: any APIKeyStoring = KeychainAPIKeyStore(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        self.defaults = defaults
+        self.apiKeyStore = apiKeyStore
+        self.environment = environment
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? false
         enableVADTrim = defaults.object(forKey: Keys.enableVADTrim) as? Bool ?? true
         enableAutoStopOnSilence = defaults.object(forKey: Keys.enableAutoStopOnSilence) as? Bool ?? true
@@ -158,7 +165,6 @@ final class AppSettings: ObservableObject {
         promptEnabled = defaults.object(forKey: Keys.promptEnabled) as? Bool ?? true
         promptMinDurationSeconds = defaults.object(forKey: Keys.promptMinDurationSeconds) as? Double ?? 1.0
         languageModeRawValue = defaults.string(forKey: Keys.languageModeRawValue) ?? LanguageMode.auto.rawValue
-        useFullWidthPunctuation = defaults.object(forKey: Keys.useFullWidthPunctuation) as? Bool ?? true
         refreshAPIKeyCache()
         applyLocalizationPreference()
     }
@@ -208,7 +214,7 @@ final class AppSettings: ObservableObject {
             return cachedAPIKey
         }
 
-        if let envValue = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !envValue.isEmpty {
+        if let envValue = environment["OPENAI_API_KEY"], !envValue.isEmpty {
             return envValue
         }
 
@@ -225,7 +231,7 @@ final class AppSettings: ObservableObject {
     }
 
     func hasStoredAPIKey() -> Bool {
-        apiKeySourceState == .localCache
+        apiKeySourceState == .keychain || apiKeySourceState == .localCache
     }
 
     func effectivePrompt(forRecordingSeconds seconds: TimeInterval) -> String? {
@@ -247,23 +253,25 @@ final class AppSettings: ObservableObject {
         )
     }
 
-    func saveAPIKey(_ key: String) {
+    func saveAPIKey(_ key: String) throws {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            clearAPIKey()
+            try clearAPIKey()
             return
         }
 
-        defaults.set(trimmed, forKey: Keys.apiKeyLocalCache)
+        try apiKeyStore.save(trimmed)
+        defaults.removeObject(forKey: Keys.apiKeyLocalCache)
         cachedAPIKey = trimmed
-        apiKeySourceState = .localCache
+        apiKeySourceState = .keychain
     }
 
-    func clearAPIKey() {
+    func clearAPIKey() throws {
+        try apiKeyStore.delete()
         defaults.removeObject(forKey: Keys.apiKeyLocalCache)
         cachedAPIKey = nil
 
-        if let envValue = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !envValue.isEmpty {
+        if let envValue = environment["OPENAI_API_KEY"], !envValue.isEmpty {
             apiKeySourceState = .environment
         } else {
             apiKeySourceState = .none
@@ -271,14 +279,31 @@ final class AppSettings: ObservableObject {
     }
 
     private func refreshAPIKeyCache() {
-        if let value = defaults.string(forKey: Keys.apiKeyLocalCache), !value.isEmpty {
+        if let value = try? apiKeyStore.read(), !value.isEmpty {
             cachedAPIKey = value
-            apiKeySourceState = .localCache
+            apiKeySourceState = .keychain
+            defaults.removeObject(forKey: Keys.apiKeyLocalCache)
+            return
+        }
+
+        // One-time migration from the legacy plaintext UserDefaults entry.
+        if let value = defaults.string(forKey: Keys.apiKeyLocalCache), !value.isEmpty {
+            do {
+                try apiKeyStore.save(value)
+                defaults.removeObject(forKey: Keys.apiKeyLocalCache)
+                cachedAPIKey = value
+                apiKeySourceState = .keychain
+            } catch {
+                // Preserve access for this launch if Keychain is temporarily
+                // unavailable; the next launch will retry migration.
+                cachedAPIKey = value
+                apiKeySourceState = .localCache
+            }
             return
         }
 
         cachedAPIKey = nil
-        if let envValue = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !envValue.isEmpty {
+        if let envValue = environment["OPENAI_API_KEY"], !envValue.isEmpty {
             apiKeySourceState = .environment
         } else {
             apiKeySourceState = .none
